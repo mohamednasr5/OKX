@@ -34,7 +34,8 @@ const FIREBASE_CONFIG = {
 };
 
 // Firebase refs (set after init)
-let dbRef = null;  // points to /settings in Realtime DB
+let dbRef = null;
+let isSaving = false; // prevents Firebase listener from overriding during active save
 
 // Initialize Firebase — uses compat SDK loaded from CDN in index.html
 function initFirebase() {
@@ -47,11 +48,11 @@ function initFirebase() {
     dbRef.on('value', snap => {
       const data = snap.val();
       if (!data) return;
+      if (isSaving) return; // ← ignore Firebase echo while we're the ones saving
       if (Array.isArray(data.coins))  state.coins      = data.coins;
       if (data.usdToEgp)              state.usdToEgp   = parseFloat(data.usdToEgp) || 50;
       if (data.signals)               state.signals    = data.signals;
       if (data.lastSignalUpdate)      state.lastSignalUpdate = data.lastSignalUpdate;
-      // Also keep localStorage as offline fallback
       localSave();
       renderScreen();
     }, err => {
@@ -76,12 +77,10 @@ function showDbStatus(msg) {
 // STORAGE — Firebase primary, localStorage fallback
 // ═══════════════════════════════════════
 async function save() {
-  // Always save locally first (instant, offline-safe)
   localSave();
-
-  // Then sync to Firebase if connected
   if (!dbRef) return;
   try {
+    isSaving = true;
     await dbRef.set({
       coins:            state.coins,
       usdToEgp:         state.usdToEgp,
@@ -92,6 +91,9 @@ async function save() {
   } catch(e) {
     console.warn('Firebase save error:', e);
     showDbStatus('🔴 خطأ في الحفظ');
+  } finally {
+    // Release lock after Firebase echo has time to arrive and be ignored
+    setTimeout(() => { isSaving = false; }, 1500);
   }
 }
 
