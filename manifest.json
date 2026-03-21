@@ -2,7 +2,7 @@
   "name": "OKX Crypto Tracker",
   "short_name": "OKX Tracker",
   "description": "متابعة العملات الرقمية مع إشارات AI",
-  "start_url": "/index.html",
+  "start_url": "https://mohamednasr5.github.io/OKX/",
   "display": "standalone",
   "background_color": "#0a0e1a",
   "theme_color": "#00d4aa",
