@@ -20,19 +20,96 @@ let state = {
 };
 
 // ═══════════════════════════════════════
-// STORAGE
+// FIREBASE CONFIG
 // ═══════════════════════════════════════
-function save() {
-  localStorage.setItem('okx_coins',    JSON.stringify(state.coins));
-  localStorage.setItem('okx_egp',      state.usdToEgp);
-  localStorage.setItem('okx_signals',  JSON.stringify(state.signals));
-  if (state.lastSignalUpdate) localStorage.setItem('okx_sig_ts', state.lastSignalUpdate);
+const FIREBASE_CONFIG = {
+  apiKey:            "AIzaSyAbkjK3I1OmNi4FLHBBjvd19bwQ74y4Dpk",
+  authDomain:        "okx01-3c8d1.firebaseapp.com",
+  databaseURL:       "https://okx01-3c8d1-default-rtdb.firebaseio.com",
+  projectId:         "okx01-3c8d1",
+  storageBucket:     "okx01-3c8d1.firebasestorage.app",
+  messagingSenderId: "472089731731",
+  appId:             "1:472089731731:web:1206305ca415b5e8056366",
+  measurementId:     "G-NE80437ZQ0"
+};
+
+// Firebase refs (set after init)
+let dbRef = null;  // points to /settings in Realtime DB
+
+// Initialize Firebase — uses compat SDK loaded from CDN in index.html
+function initFirebase() {
+  try {
+    if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
+    const db = firebase.database();
+    dbRef = db.ref('settings');
+
+    // 🔴 LIVE LISTENER — updates state instantly when DB changes (even from another device)
+    dbRef.on('value', snap => {
+      const data = snap.val();
+      if (!data) return;
+      if (Array.isArray(data.coins))  state.coins      = data.coins;
+      if (data.usdToEgp)              state.usdToEgp   = parseFloat(data.usdToEgp) || 50;
+      if (data.signals)               state.signals    = data.signals;
+      if (data.lastSignalUpdate)      state.lastSignalUpdate = data.lastSignalUpdate;
+      // Also keep localStorage as offline fallback
+      localSave();
+      renderScreen();
+    }, err => {
+      console.warn('Firebase listener error:', err);
+    });
+
+    console.log('✅ Firebase connected');
+    showDbStatus('🟢 متصل بقاعدة البيانات');
+  } catch(e) {
+    console.warn('Firebase init failed, using localStorage:', e);
+    showDbStatus('🟡 وضع عدم الاتصال');
+  }
 }
+
+// Show connection status badge
+function showDbStatus(msg) {
+  const el = document.getElementById('dbStatus');
+  if (el) el.textContent = msg;
+}
+
+// ═══════════════════════════════════════
+// STORAGE — Firebase primary, localStorage fallback
+// ═══════════════════════════════════════
+async function save() {
+  // Always save locally first (instant, offline-safe)
+  localSave();
+
+  // Then sync to Firebase if connected
+  if (!dbRef) return;
+  try {
+    await dbRef.set({
+      coins:            state.coins,
+      usdToEgp:         state.usdToEgp,
+      signals:          state.signals,
+      lastSignalUpdate: state.lastSignalUpdate || null,
+      updatedAt:        Date.now(),
+    });
+  } catch(e) {
+    console.warn('Firebase save error:', e);
+    showDbStatus('🔴 خطأ في الحفظ');
+  }
+}
+
+function localSave() {
+  try {
+    localStorage.setItem('okx_coins',   JSON.stringify(state.coins));
+    localStorage.setItem('okx_egp',     state.usdToEgp);
+    localStorage.setItem('okx_signals', JSON.stringify(state.signals));
+    if (state.lastSignalUpdate) localStorage.setItem('okx_sig_ts', state.lastSignalUpdate);
+  } catch(e) {}
+}
+
+// Load from localStorage first (instant boot), then Firebase live listener takes over
 function load() {
   try { state.coins   = JSON.parse(localStorage.getItem('okx_coins')   || '[]'); } catch(e){}
   try { state.signals = JSON.parse(localStorage.getItem('okx_signals') || '{}'); } catch(e){}
-  state.usdToEgp = parseFloat(localStorage.getItem('okx_egp') || '50') || 50;
-  state.lastSignalUpdate = parseInt(localStorage.getItem('okx_sig_ts') || '0') || null;
+  state.usdToEgp        = parseFloat(localStorage.getItem('okx_egp')    || '50') || 50;
+  state.lastSignalUpdate = parseInt(localStorage.getItem('okx_sig_ts')  || '0')  || null;
 }
 
 // ═══════════════════════════════════════
@@ -492,6 +569,8 @@ function renderSettings() {
     <button class="save-btn" id="saveSettingsBtn">💾 حفظ الإعدادات</button>
 
     <div style="background:rgba(0,229,184,.05);border:1px solid rgba(0,229,184,.15);border-radius:12px;padding:12px 14px;font-size:11px;color:var(--text3);line-height:1.9;">
+      🔥 <strong style="color:#ff6d00">Firebase</strong> Realtime Database — بياناتك محفوظة على السحابة<br>
+      <span id="dbStatus">🟡 جاري الاتصال...</span><br>
       🤖 <strong style="color:var(--accent)">AI مجاني تماماً</strong> — لا يلزم أي تسجيل أو مفتاح<br>
       🌐 يستخدم LLM7.io مع GPT-4o-mini و DeepSeek<br>
       ⏱️ تحليل تلقائي كل <strong style="color:var(--accent)">5 دقائق</strong> من تبويب إشارات AI<br>
@@ -631,17 +710,18 @@ function registerSW() {
 // BOOT
 // ═══════════════════════════════════════
 window.addEventListener('DOMContentLoaded', async ()=>{
-  load();
+  load();           // instant boot from localStorage
   initNav();
   renderScreen();
+  initFirebase();   // connect Firebase (live listener will update state)
   await refreshPrices();
   renderScreen();
   startAutoRefresh();
   registerSW();
 
   // Auto-run AI if data is stale
-  const age=state.lastSignalUpdate?Date.now()-state.lastSignalUpdate:Infinity;
-  if(age>5*60*1000&&state.coins.length>0) {
-    setTimeout(runAllSignals, 2000);
+  const age = state.lastSignalUpdate ? Date.now()-state.lastSignalUpdate : Infinity;
+  if (age > 5*60*1000 && state.coins.length > 0) {
+    setTimeout(runAllSignals, 3000);
   }
 });
