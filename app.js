@@ -1,4 +1,4 @@
-// OKX Tracker PWA - app.js 
+// OKX Tracker PWA - app.js
 'use strict';
 
 // ═══════════════════════════════════════
@@ -6,17 +6,18 @@
 // ═══════════════════════════════════════
 const OKX_TICKER  = 'https://www.okx.com/api/v5/market/ticker';
 const OKX_CANDLES = 'https://www.okx.com/api/v5/market/candles';
-const LLM7_API    = 'https://api.llm7.io/v1/chat/completions';
 
 let state = {
   coins: [],
   usdToEgp: 50,
+  alertAt: 10,          // تنبيه كل $ زيادة في الربح
   prices: {},
   signals: {},
   lastSignalUpdate: null,
   currentScreen: 'portfolio',
   analyzing: false,
   lastPriceUpdate: null,
+  alertFired: {},       // لتتبع التنبيهات اللي اتعملت
 };
 
 // ═══════════════════════════════════════
@@ -33,48 +34,42 @@ const FIREBASE_CONFIG = {
   measurementId:     "G-NE80437ZQ0"
 };
 
-// Firebase refs (set after init)
-let dbRef = null;
-let isSaving = false; // prevents Firebase listener from overriding during active save
+let dbRef   = null;
+let isSaving = false;
 
-// Initialize Firebase — uses compat SDK loaded from CDN in index.html
 function initFirebase() {
   try {
     if (!firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
     const db = firebase.database();
     dbRef = db.ref('settings');
 
-    // 🔴 LIVE LISTENER — updates state instantly when DB changes (even from another device)
     dbRef.on('value', snap => {
       const data = snap.val();
       if (!data) return;
-      if (isSaving) return; // ← ignore Firebase echo while we're the ones saving
-      if (Array.isArray(data.coins))  state.coins      = data.coins;
-      if (data.usdToEgp)              state.usdToEgp   = parseFloat(data.usdToEgp) || 50;
-      if (data.signals)               state.signals    = data.signals;
+      if (isSaving) return;
+      if (Array.isArray(data.coins))  state.coins            = data.coins;
+      if (data.usdToEgp)              state.usdToEgp         = parseFloat(data.usdToEgp) || 50;
+      if (data.alertAt != null)       state.alertAt          = parseFloat(data.alertAt)  || 10;
+      if (data.signals)               state.signals          = data.signals;
       if (data.lastSignalUpdate)      state.lastSignalUpdate = data.lastSignalUpdate;
       localSave();
       renderScreen();
-    }, err => {
-      console.warn('Firebase listener error:', err);
-    });
+    }, err => console.warn('Firebase listener error:', err));
 
-    console.log('✅ Firebase connected');
     showDbStatus('🟢 متصل بقاعدة البيانات');
   } catch(e) {
-    console.warn('Firebase init failed, using localStorage:', e);
+    console.warn('Firebase init failed:', e);
     showDbStatus('🟡 وضع عدم الاتصال');
   }
 }
 
-// Show connection status badge
 function showDbStatus(msg) {
   const el = document.getElementById('dbStatus');
   if (el) el.textContent = msg;
 }
 
 // ═══════════════════════════════════════
-// STORAGE — Firebase primary, localStorage fallback
+// STORAGE
 // ═══════════════════════════════════════
 async function save() {
   localSave();
@@ -84,6 +79,7 @@ async function save() {
     await dbRef.set({
       coins:            state.coins,
       usdToEgp:         state.usdToEgp,
+      alertAt:          state.alertAt,
       signals:          state.signals,
       lastSignalUpdate: state.lastSignalUpdate || null,
       updatedAt:        Date.now(),
@@ -92,7 +88,6 @@ async function save() {
     console.warn('Firebase save error:', e);
     showDbStatus('🔴 خطأ في الحفظ');
   } finally {
-    // Release lock after Firebase echo has time to arrive and be ignored
     setTimeout(() => { isSaving = false; }, 1500);
   }
 }
@@ -101,17 +96,18 @@ function localSave() {
   try {
     localStorage.setItem('okx_coins',   JSON.stringify(state.coins));
     localStorage.setItem('okx_egp',     state.usdToEgp);
+    localStorage.setItem('okx_alertAt', state.alertAt);
     localStorage.setItem('okx_signals', JSON.stringify(state.signals));
     if (state.lastSignalUpdate) localStorage.setItem('okx_sig_ts', state.lastSignalUpdate);
   } catch(e) {}
 }
 
-// Load from localStorage first (instant boot), then Firebase live listener takes over
 function load() {
   try { state.coins   = JSON.parse(localStorage.getItem('okx_coins')   || '[]'); } catch(e){}
   try { state.signals = JSON.parse(localStorage.getItem('okx_signals') || '{}'); } catch(e){}
-  state.usdToEgp        = parseFloat(localStorage.getItem('okx_egp')    || '50') || 50;
-  state.lastSignalUpdate = parseInt(localStorage.getItem('okx_sig_ts')  || '0')  || null;
+  state.usdToEgp        = parseFloat(localStorage.getItem('okx_egp')     || '50') || 50;
+  state.alertAt         = parseFloat(localStorage.getItem('okx_alertAt') || '10') || 10;
+  state.lastSignalUpdate = parseInt(localStorage.getItem('okx_sig_ts')   || '0')  || null;
 }
 
 // ═══════════════════════════════════════
@@ -140,6 +136,84 @@ function timeAgo(ts) {
 }
 
 // ═══════════════════════════════════════
+// PROFIT ALERT — صوت + إشعار + بانر
+// ═══════════════════════════════════════
+function playProfitSound() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [523, 659, 784, 1047].forEach((freq, i) => {
+      const osc  = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      const t = ctx.currentTime + i * 0.13;
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.35, t + 0.04);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+      osc.start(t);
+      osc.stop(t + 0.5);
+    });
+  } catch(e) {}
+}
+
+function sendNotification(title, body) {
+  if (!('Notification' in window)) return;
+  const go = () => { try { new Notification(title, { body }); } catch(e) {} };
+  if (Notification.permission === 'granted') go();
+  else if (Notification.permission !== 'denied')
+    Notification.requestPermission().then(p => { if (p==='granted') go(); });
+}
+
+function checkProfitAlert(totalPnl) {
+  const thr = state.alertAt;
+  if (!thr || thr <= 0 || totalPnl <= 0) return;
+
+  const level = Math.floor(totalPnl / thr);
+  if (level <= 0) return;
+
+  // reset fired levels لو الربح اتراجع
+  const maxFiredLevel = Math.max(0, ...Object.keys(state.alertFired).map(k => parseInt(k.replace('lv','')) || 0));
+  if (level < maxFiredLevel) state.alertFired = {};
+
+  const key = 'lv' + level;
+  if (state.alertFired[key]) return;
+  state.alertFired[key] = true;
+
+  const earned    = (level * thr).toFixed(0);
+  const earnedEGP = (level * thr * state.usdToEgp).toFixed(0);
+
+  playProfitSound();
+  toast(`🎉 مبروك! ربحت $${earned} — ${Number(earnedEGP).toLocaleString()} جنيه!`, false, true);
+  sendNotification('💰 تهانينا!', `محفظتك ربحت $${earned} ≈ ${Number(earnedEGP).toLocaleString()} جنيه 🚀`);
+  showProfitBanner(earned, earnedEGP);
+}
+
+function showProfitBanner(usd, egp) {
+  const old = document.getElementById('profitBanner');
+  if (old) old.remove();
+
+  const b = document.createElement('div');
+  b.id = 'profitBanner';
+  b.className = 'profit-alert-banner';
+  b.innerHTML = `
+    <div class="alert-icon">🎉</div>
+    <div style="flex:1">
+      <div class="alert-text-big">مبروك! ربحت $${usd}</div>
+      <div class="alert-text-sub">≈ ${Number(egp).toLocaleString()} جنيه مصري — استمر! 🚀</div>
+    </div>
+    <div class="alert-close" onclick="this.parentElement.remove()">✕</div>`;
+
+  const sc = document.getElementById('mainScreen');
+  if (!sc) return;
+  const rs = sc.querySelector('.rate-strip');
+  if (rs) rs.insertAdjacentElement('afterend', b);
+  else sc.prepend(b);
+  setTimeout(() => { if (b.parentElement) b.remove(); }, 12000);
+}
+
+// ═══════════════════════════════════════
 // API: PRICES
 // ═══════════════════════════════════════
 async function fetchTicker(symbol) {
@@ -149,24 +223,35 @@ async function fetchTicker(symbol) {
     if (d.code==='0' && d.data?.length>0) {
       const t = d.data[0];
       return {
-        price:    parseFloat(t.last),
-        open24h:  parseFloat(t.sodUtc8||t.open24h||t.last),
-        high24h:  parseFloat(t.high24h),
-        low24h:   parseFloat(t.low24h),
-        vol24h:   parseFloat(t.vol24h),
+        price:   parseFloat(t.last),
+        open24h: parseFloat(t.sodUtc8||t.open24h||t.last),
+        high24h: parseFloat(t.high24h),
+        low24h:  parseFloat(t.low24h),
+        vol24h:  parseFloat(t.vol24h),
       };
     }
-  } catch(e){}
+  } catch(e) {}
   return null;
 }
 
 async function refreshPrices() {
   if (!state.coins.length) return;
-  const results = await Promise.all(state.coins.map(c=>fetchTicker(c.symbol)));
-  results.forEach((r,i)=>{
+  const results = await Promise.all(state.coins.map(c => fetchTicker(c.symbol)));
+  results.forEach((r, i) => {
     if (r) state.prices[state.coins[i].symbol] = r;
   });
   state.lastPriceUpdate = Date.now();
+
+  // حساب الربح الكلي وتشغيل التنبيه
+  let totalPnl = 0;
+  state.coins.forEach(c => {
+    const t   = state.prices[c.symbol];
+    const price = t?.price ?? 0;
+    const qty   = parseFloat(c.quantity) || 0;
+    const avg   = parseFloat(c.avgBuy)   || 0;
+    totalPnl   += (price - avg) * qty;
+  });
+  if (totalPnl > 0) checkProfitAlert(totalPnl);
 }
 
 // ═══════════════════════════════════════
@@ -182,7 +267,7 @@ async function fetchCandles(symbol) {
         low:parseFloat(c[3]),close:parseFloat(c[4]),vol:parseFloat(c[5])
       })).reverse();
     }
-  } catch(e){}
+  } catch(e) {}
   return null;
 }
 function ema(cls,p) {
@@ -237,17 +322,19 @@ function buildSnap(symbol,candles) {
   const ch5=candles.length>5?((cur.close-candles[candles.length-6].close)/candles[candles.length-6].close*100):0;
   const ch12=candles.length>12?((cur.close-candles[candles.length-13].close)/candles[candles.length-13].close*100):0;
   return {symbol,price:cur.close,atr:ATR,
-    rsi:R?.toFixed(2),
+    rsi:R?.toFixed(2),rsiVal:R,
     ema9CrossUp:e9&&e21?e9>e21:null,
     priceAboveSMA:s20?cur.close>s20:null,
     macdPositive:macd?macd>0:null,
     bbPct:B?((cur.close-B.lower)/(B.upper-B.lower)*100).toFixed(1):null,
-    volRatio:volR?.toFixed(2),
+    bbPctVal:B?((cur.close-B.lower)/(B.upper-B.lower)*100):null,
+    volRatio:volR?.toFixed(2),volRatioVal:volR,
     resistance:hi20,support:lo20,
     candleGreen:cur.close>cur.open,
     prevGreen:prv.close>prv.open,
     bodyPct:Math.abs((cur.close-cur.open)/cur.open*100).toFixed(3),
-    ch1:ch1.toFixed(3),ch5:ch5.toFixed(3),ch12:ch12.toFixed(3)
+    ch1:ch1.toFixed(3),ch5:ch5.toFixed(3),ch12:ch12.toFixed(3),
+    ch1Val:ch1,ch5Val:ch5,
   };
 }
 function calcLevels(signal,snap) {
@@ -258,92 +345,297 @@ function calcLevels(signal,snap) {
 }
 
 // ═══════════════════════════════════════
-// AI ANALYSIS
+// AI ANALYSIS — بالعامية المصرية 100%
 // ═══════════════════════════════════════
-async function callLLM7(model,snap) {
-  const pr=`Crypto technical analyst. Analyze ${snap.symbol}/USDT 5min chart.
-Data: Price=$${snap.price}, RSI=${snap.rsi}${snap.rsi<30?' OVERSOLD':snap.rsi>70?' OVERBOUGHT':''}, EMA9>${snap.ema9CrossUp?'EMA21 bullish':'EMA21 bearish'}, Price ${snap.priceAboveSMA?'above':'below'} SMA20, MACD ${snap.macdPositive?'positive':'negative'}, BB%=${snap.bbPct}%, VolumeRatio=${snap.volRatio}x, 1c=${snap.ch1}%, 5c=${snap.ch5}%, 12c=${snap.ch12}%, candle=${snap.candleGreen?'GREEN':'RED'} body=${snap.bodyPct}%, resistance=$${snap.resistance?.toFixed(4)}, support=$${snap.support?.toFixed(4)}
-Reply ONLY valid JSON no markdown: {"signal":"UP","strength":"STRONG","confidence":75,"reason":"Arabic one sentence"}
-signal=UP|DOWN|NEUTRAL, strength=STRONG|MODERATE|WEAK, confidence=0-100`;
-  const res=await fetch(LLM7_API,{
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({model,max_tokens:120,temperature:0.2,
-      messages:[{role:'system',content:'Crypto analyst. JSON only.'},{role:'user',content:pr}]})
-  });
-  if(!res.ok) throw new Error(`${res.status}`);
-  const d=await res.json();
-  const txt=(d.choices?.[0]?.message?.content||'').replace(/```json|```/g,'').trim();
-  return JSON.parse(txt);
+
+// بيبني وصف مصري للمؤشرات بدل الإنجليزي
+function buildArabicContext(snap, coin) {
+  const qty = parseFloat(coin.quantity) || 0;
+  const avg = parseFloat(coin.avgBuy)   || 0;
+  const pnl = snap.price && avg ? ((snap.price - avg) / avg * 100) : null;
+  const pnlUSD = snap.price ? (snap.price - avg) * qty : null;
+  const pnlEGP = pnlUSD ? (pnlUSD * state.usdToEgp) : null;
+
+  const rsiDesc = snap.rsiVal != null
+    ? (snap.rsiVal < 30 ? `RSI عند ${snap.rsi} — العملة في منطقة تشبع بيعي قوي`
+      : snap.rsiVal > 70 ? `RSI عند ${snap.rsi} — العملة في منطقة تشبع شرائي`
+      : `RSI عند ${snap.rsi} — محايد`)
+    : '';
+
+  const emaDesc = snap.ema9CrossUp != null
+    ? (snap.ema9CrossUp ? 'المتوسط المتحرك السريع (9) فوق البطيء (21) — إشارة صعود'
+      : 'المتوسط المتحرك السريع (9) تحت البطيء (21) — إشارة هبوط')
+    : '';
+
+  const smaDesc = snap.priceAboveSMA != null
+    ? (snap.priceAboveSMA ? 'السعر فوق المتوسط المتحرك 20 — اتجاه إيجابي'
+      : 'السعر تحت المتوسط المتحرك 20 — اتجاه سلبي')
+    : '';
+
+  const macdDesc = snap.macdPositive != null
+    ? (snap.macdPositive ? 'الـ MACD موجب — زخم صاعد' : 'الـ MACD سالب — زخم هابط')
+    : '';
+
+  const bbDesc = snap.bbPctVal != null
+    ? (snap.bbPctVal < 20 ? 'السعر قرب الحد الأدنى لـ Bollinger Bands — منطقة شراء محتملة'
+      : snap.bbPctVal > 80 ? 'السعر قرب الحد الأعلى لـ Bollinger Bands — منطقة بيع محتملة'
+      : 'السعر في منتصف نطاق Bollinger Bands')
+    : '';
+
+  const volDesc = snap.volRatioVal != null
+    ? (snap.volRatioVal > 1.5 ? 'حجم التداول مرتفع جداً — حركة قوية'
+      : snap.volRatioVal < 0.7 ? 'حجم التداول منخفض — حركة ضعيفة'
+      : 'حجم التداول عادي')
+    : '';
+
+  const candleDesc = snap.candleGreen
+    ? `الشمعة الحالية خضرا (صاعدة) بحجم جسم ${snap.bodyPct}%`
+    : `الشمعة الحالية حمرا (هابطة) بحجم جسم ${snap.bodyPct}%`;
+
+  const posDesc = pnlUSD != null
+    ? `المستخدم شايل ${qty} وحدة بمتوسط $${fmtP(avg)}، وضعه الحالي: ${pnl >= 0 ? 'ربح' : 'خسارة'} ${Math.abs(pnl).toFixed(2)}% يعني $${Math.abs(pnlUSD).toFixed(2)} (≈ ${Math.abs(pnlEGP).toFixed(0)} جنيه).`
+    : `المستخدم شايل ${qty} وحدة بمتوسط $${fmtP(avg)}.`;
+
+  return `
+بيانات العملة ${snap.symbol}/USDT:
+- السعر الحالي: $${fmtP(snap.price)}
+- التغيير آخر شمعة: ${snap.ch1}% | آخر 5 شمعات: ${snap.ch5}%
+- ${rsiDesc}
+- ${emaDesc}
+- ${smaDesc}
+- ${macdDesc}
+- ${bbDesc}
+- ${volDesc}
+- ${candleDesc}
+- مستوى المقاومة: $${fmtP(snap.resistance)} | الدعم: $${fmtP(snap.support)}
+- ${posDesc}
+سعر الدولار: ${state.usdToEgp} جنيه مصري`.trim();
 }
 
-async function analyzeOne(symbol) {
-  const candles=await fetchCandles(symbol);
-  if(!candles||candles.length<30) return{error:'بيانات غير كافية'};
-  const snap=buildSnap(symbol,candles);
-  let parsed;
-  try { parsed=await callLLM7('gpt-4o-mini-2024-07-18',snap); }
-  catch(e1) {
-    try { parsed=await callLLM7('deepseek-chat',snap); }
-    catch(e2) { return{error:'فشل الاتصال بالـ AI'}; }
+async function callAI(snap, coin) {
+  const context = buildArabicContext(snap, coin);
+
+  const systemMsg = `أنت "أستاذ كريبتو" — مستشار عملات رقمية مصري خبير وصريح جداً.
+قواعد صارمة جداً لازم تتبعها:
+١- تتكلم عامية مصرية 100% في كل حرف — ممنوع أي إنجليزي في الشرح خالص.
+٢- ممنوع تكتب جمل تقنية بالإنجليزي زي "Price is below SMA" أو "RSI is low" أو "EMA cross" — قول ده كله بالعربي المصري.
+٣- ابعت JSON فقط بدون أي نص تاني.`;
+
+  const userMsg = `${context}
+
+مطلوب منك:
+١- اشرح بالعامية المصرية إيه اللي بيحصل في العملة دي دلوقتي في السوق.
+٢- قول وضع المستخدم — ربحان ولا خسران وبكام جنيه تقريباً.
+٣- دي توصيتك الصريحة: اشتري / بيع / استنى ولييه.
+
+ابعت JSON بس بالشكل ده:
+{"signal":"UP","strength":"STRONG","confidence":78,"reason":"شرح بالعامية المصرية 100% — جملتين أو تلاتة تصف السوق وحالة المستخدم والتوصية"}
+
+signal = UP أو DOWN أو NEUTRAL
+strength = STRONG أو MODERATE أو WEAK
+confidence = رقم من 55 لـ 92
+reason = عامية مصرية فقط — ممنوع إنجليزي`;
+
+  // بنجرب Claude Sonnet أول، لو فشل بنجرب LLM7
+  const apis = [
+    {
+      url: 'https://api.anthropic.com/v1/messages',
+      buildBody: () => JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 200,
+        system: systemMsg,
+        messages: [{ role: 'user', content: userMsg }]
+      }),
+      parseResp: async (r) => {
+        const d = await r.json();
+        const txt = (d.content||[]).map(b=>b.text||'').join('').replace(/```json|```/g,'').trim();
+        return JSON.parse(txt.match(/\{[\s\S]*\}/)[0]);
+      },
+      headers: { 'Content-Type': 'application/json' }
+    },
+    {
+      url: 'https://api.llm7.io/v1/chat/completions',
+      buildBody: () => JSON.stringify({
+        model: 'gpt-4o-mini-2024-07-18',
+        max_tokens: 200,
+        temperature: 0.2,
+        messages: [
+          { role: 'system', content: systemMsg },
+          { role: 'user',   content: userMsg   }
+        ]
+      }),
+      parseResp: async (r) => {
+        const d = await r.json();
+        const txt = (d.choices?.[0]?.message?.content||'').replace(/```json|```/g,'').trim();
+        return JSON.parse(txt.match(/\{[\s\S]*\}/)[0]);
+      },
+      headers: { 'Content-Type': 'application/json' }
+    },
+    {
+      url: 'https://api.llm7.io/v1/chat/completions',
+      buildBody: () => JSON.stringify({
+        model: 'deepseek-chat',
+        max_tokens: 200,
+        temperature: 0.2,
+        messages: [
+          { role: 'system', content: systemMsg },
+          { role: 'user',   content: userMsg   }
+        ]
+      }),
+      parseResp: async (r) => {
+        const d = await r.json();
+        const txt = (d.choices?.[0]?.message?.content||'').replace(/```json|```/g,'').trim();
+        return JSON.parse(txt.match(/\{[\s\S]*\}/)[0]);
+      },
+      headers: { 'Content-Type': 'application/json' }
+    },
+  ];
+
+  for (const api of apis) {
+    try {
+      const r = await fetch(api.url, {
+        method: 'POST',
+        headers: api.headers,
+        body: api.buildBody()
+      });
+      if (!r.ok) continue;
+      const parsed = await api.parseResp(r);
+      return parsed;
+    } catch(e) {
+      continue;
+    }
   }
-  const validS=['UP','DOWN','NEUTRAL'];
-  const validST=['STRONG','MODERATE','WEAK'];
-  const signal=validS.includes(parsed.signal)?parsed.signal:'NEUTRAL';
-  const strength=validST.includes(parsed.strength)?parsed.strength:'MODERATE';
-  const confidence=Math.min(100,Math.max(0,parseInt(parsed.confidence)||50));
-  const reason=typeof parsed.reason==='string'?parsed.reason:'لا يوجد تفسير';
-  const levels=calcLevels(signal,snap);
-  return{signal,strength,confidence,reason,...levels,timeframe:'5-15 دقيقة',fetchedAt:Date.now(),priceAtSignal:snap.price};
+  throw new Error('فشل الاتصال بالـ AI');
+}
+
+async function analyzeOne(coin) {
+  const candles = await fetchCandles(coin.symbol);
+  if (!candles || candles.length < 30) return { error: 'بيانات غير كافية' };
+  const snap = buildSnap(coin.symbol, candles);
+
+  let parsed;
+  try {
+    parsed = await callAI(snap, coin);
+  } catch(e) {
+    return { error: 'فشل الاتصال بالـ AI' };
+  }
+
+  const validS  = ['UP','DOWN','NEUTRAL'];
+  const validST = ['STRONG','MODERATE','WEAK'];
+  const signal     = validS.includes(parsed.signal)     ? parsed.signal     : 'NEUTRAL';
+  const strength   = validST.includes(parsed.strength)  ? parsed.strength   : 'MODERATE';
+  const confidence = Math.min(92, Math.max(55, parseInt(parsed.confidence)||65));
+  const reason     = typeof parsed.reason === 'string'  ? parsed.reason     : 'لا يوجد تفسير';
+  const levels     = calcLevels(signal, snap);
+  return { signal, strength, confidence, reason, ...levels, timeframe:'5-15 دقيقة', fetchedAt:Date.now(), priceAtSignal:snap.price };
 }
 
 async function runAllSignals() {
-  if(state.analyzing||!state.coins.length) return;
-  state.analyzing=true;
+  if (state.analyzing || !state.coins.length) return;
+  state.analyzing = true;
   renderScreen();
-  for(const c of state.coins) {
-    const result=await analyzeOne(c.symbol);
-    state.signals[c.symbol]=result;
+  for (const c of state.coins) {
+    const result = await analyzeOne(c);
+    state.signals[c.symbol] = result;
     save();
-    if(state.currentScreen==='signals') renderScreen();
+    if (state.currentScreen === 'signals') renderScreen();
   }
-  state.lastSignalUpdate=Date.now();
-  state.analyzing=false;
+  state.lastSignalUpdate = Date.now();
+  state.analyzing = false;
   save();
   renderScreen();
   toast('✅ تم تحديث إشارات AI');
 }
 
 // ═══════════════════════════════════════
+// EDIT MODAL
+// ═══════════════════════════════════════
+let _editIdx = null;
+
+function openEditModal(idx) {
+  _editIdx = idx;
+  const c = state.coins[idx];
+  document.getElementById('editAva').textContent       = c.symbol.substring(0,3);
+  document.getElementById('editSymLabel').textContent  = c.symbol.toUpperCase() + '/USDT';
+  document.getElementById('editPairLabel').textContent = 'الكمية: ' + c.quantity + ' | متوسط: $' + c.avgBuy;
+  document.getElementById('editQty').value             = c.quantity;
+  document.getElementById('editAvg').value             = c.avgBuy;
+  document.getElementById('editModal').classList.add('open');
+  setTimeout(() => document.getElementById('editQty')?.focus(), 350);
+}
+
+function closeEditModal(e) {
+  if (e && e.target !== document.getElementById('editModal')) return;
+  document.getElementById('editModal').classList.remove('open');
+  _editIdx = null;
+}
+
+function saveEdit() {
+  if (_editIdx === null) return;
+  const qty = document.getElementById('editQty')?.value?.trim();
+  const avg = document.getElementById('editAvg')?.value?.trim();
+  if (!qty || isNaN(qty) || +qty <= 0) { toast('⚠️ الكمية لازم أكبر من صفر!', true); return; }
+  if (!avg || isNaN(avg) || +avg <= 0) { toast('⚠️ سعر الشراء لازم صحيح!',   true); return; }
+  state.coins[_editIdx].quantity = qty;
+  state.coins[_editIdx].avgBuy   = avg;
+  save();
+  document.getElementById('editModal').classList.remove('open');
+  _editIdx = null;
+  renderScreen();
+  toast('✅ تم حفظ التعديل!');
+}
+
+function deleteFromModal() {
+  if (_editIdx === null) return;
+  const sym = state.coins[_editIdx].symbol;
+  state.coins.splice(_editIdx, 1);
+  delete state.signals[sym];
+  save();
+  document.getElementById('editModal').classList.remove('open');
+  _editIdx = null;
+  renderScreen();
+  toast('🗑️ تم حذف ' + sym);
+}
+
+// اجعل الدوال global عشان onclick في الـ HTML يشتغل
+window.openEditModal   = openEditModal;
+window.closeEditModal  = closeEditModal;
+window.saveEdit        = saveEdit;
+window.deleteFromModal = deleteFromModal;
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeEditModal(); });
+
+// ═══════════════════════════════════════
 // RENDER: PORTFOLIO
 // ═══════════════════════════════════════
 function renderPortfolio() {
-  const coins=state.coins, eg=state.usdToEgp;
-  if(!coins.length) return `
+  const coins = state.coins, eg = state.usdToEgp;
+  if (!coins.length) return `
     <div class="empty-state">
       <div class="empty-icon">📊</div>
       <div class="empty-text">لا توجد عملات بعد<br>اذهب إلى <strong>الإعدادات</strong> لإضافة عملاتك</div>
     </div>`;
 
-  let totalCost=0,totalVal=0;
-  const rows=coins.map(c=>{
-    const t=state.prices[c.symbol];
-    const price=t?.price??null;
-    const qty=parseFloat(c.quantity)||0;
-    const avg=parseFloat(c.avgBuy)||0;
-    const val=price!==null?price*qty:null;
-    const cost=avg*qty;
-    const pnl=val!==null?val-cost:null;
-    const pnlPct=cost>0&&pnl!==null?(pnl/cost*100):null;
-    const ch24=t&&t.open24h>0?((price-t.open24h)/t.open24h*100):null;
-    if(val!==null)totalVal+=val;
-    if(cost)totalCost+=cost;
-    return{...c,price,qty,avg,val,cost,pnl,pnlPct,pnlEgp:pnl!==null?pnl*eg:null,ch24};
+  let totalCost=0, totalVal=0;
+  const rows = coins.map(c => {
+    const t      = state.prices[c.symbol];
+    const price  = t?.price ?? null;
+    const qty    = parseFloat(c.quantity) || 0;
+    const avg    = parseFloat(c.avgBuy)   || 0;
+    const val    = price !== null ? price * qty : null;
+    const cost   = avg * qty;
+    const pnl    = val !== null ? val - cost : null;
+    const pnlPct = cost>0 && pnl!==null ? (pnl/cost*100) : null;
+    const ch24   = t && t.open24h>0 ? ((price-t.open24h)/t.open24h*100) : null;
+    if (val  !== null) totalVal  += val;
+    if (cost)          totalCost += cost;
+    return {...c, price, qty, avg, val, cost, pnl, pnlPct, pnlEgp: pnl!==null ? pnl*eg : null, ch24};
   });
-  const totalPnl=totalVal-totalCost;
-  const totalPnlEgp=totalPnl*eg;
-  const totalPnlPct=totalCost>0?(totalPnl/totalCost*100):0;
-  const cls=pc(totalPnl);
+
+  const totalPnl    = totalVal - totalCost;
+  const totalPnlEgp = totalPnl * eg;
+  const totalPnlPct = totalCost > 0 ? (totalPnl/totalCost*100) : 0;
+  const cls = pc(totalPnl);
 
   return `
     <div class="summary-card">
@@ -381,20 +673,20 @@ function renderPortfolio() {
     <div class="rate-strip">
       <span class="rate-strip-label">💱 سعر الدولار</span>
       <span class="rate-strip-val">${fmt(eg,2)} ج.م</span>
-      <span class="rate-strip-time">${state.lastPriceUpdate?new Date(state.lastPriceUpdate).toLocaleTimeString('ar-EG'):''}</span>
+      <span class="rate-strip-time">${state.lastPriceUpdate ? new Date(state.lastPriceUpdate).toLocaleTimeString('ar-EG') : ''}</span>
     </div>
 
     <div class="section-title">
       عملاتي <span class="section-count">${coins.length}</span>
     </div>
 
-    ${rows.map(c=>coinCard(c,eg)).join('')}`;
+    ${rows.map((c,i) => coinCard(c, eg, i)).join('')}`;
 }
 
-function coinCard(c,eg) {
-  const ip=c.pnl!==null?c.pnl>=0:null;
-  const cls=ip===null?'':ip?'profit':'loss';
-  const sig=state.signals[c.symbol];
+function coinCard(c, eg, idx) {
+  const ip  = c.pnl !== null ? c.pnl >= 0 : null;
+  const cls = ip === null ? '' : ip ? 'profit' : 'loss';
+  const sig = state.signals[c.symbol];
 
   return `<div class="coin-card ${cls}">
     <div class="coin-side-bar"></div>
@@ -405,27 +697,30 @@ function coinCard(c,eg) {
           <div>
             <div class="coin-sym">${c.symbol.toUpperCase()}</div>
             <div class="coin-pair">/ USDT</div>
-            ${c.ch24!==null?`<span class="coin-change-badge ${pc(c.ch24)}">${sign(c.ch24)}${fmt(Math.abs(c.ch24),2)}%</span>`:''}
+            ${c.ch24 !== null ? `<span class="coin-change-badge ${pc(c.ch24)}">${sign(c.ch24)}${fmt(Math.abs(c.ch24),2)}%</span>` : ''}
           </div>
         </div>
         <div class="coin-price-block">
-          <div class="coin-price ${cls}">$${c.price!==null?fmtP(c.price):'---'}</div>
-          <div class="coin-price-egp">${c.price!==null?fmt(c.price*eg,2)+' ج.م':'---'}</div>
-          ${sig&&!sig.error?`<div style="font-size:10px;text-align:left;margin-top:2px;color:${sig.signal==='UP'?'var(--profit)':sig.signal==='DOWN'?'var(--loss)':'var(--gold)'}">${sig.signal==='UP'?'🟢 صاعد':sig.signal==='DOWN'?'🔴 هابط':'🟡 محايد'}</div>`:''}
+          <div class="coin-price ${cls}">$${c.price!==null ? fmtP(c.price) : '---'}</div>
+          <div class="coin-price-egp">${c.price!==null ? fmt(c.price*eg,2)+' ج.م' : '---'}</div>
+          ${sig && !sig.error ? `<div style="font-size:10px;text-align:left;margin-top:2px;color:${sig.signal==='UP'?'var(--profit)':sig.signal==='DOWN'?'var(--loss)':'var(--gold)'}">${sig.signal==='UP'?'🟢 صاعد':sig.signal==='DOWN'?'🔴 هابط':'🟡 محايد'}</div>` : ''}
         </div>
       </div>
     </div>
     <div class="coin-stats-grid">
       <div><div class="cstat-label">الكمية</div><div class="cstat-val">${fmt(c.qty,4)}</div></div>
       <div><div class="cstat-label">متوسط الشراء</div><div class="cstat-val">$${fmtP(c.avg)}</div></div>
-      <div><div class="cstat-label">القيمة الحالية</div><div class="cstat-val">${c.val!==null?'$'+fmt(c.val):'---'}</div></div>
+      <div><div class="cstat-label">القيمة الحالية</div><div class="cstat-val">${c.val!==null ? '$'+fmt(c.val) : '---'}</div></div>
     </div>
     <div class="coin-pnl-bar">
       <div>
-        <div class="coin-pnl-usd ${cls}">${c.pnl!==null?sign(c.pnl)+'$'+fmt(Math.abs(c.pnl)):'---'}</div>
-        <div class="coin-pnl-egp">${c.pnlEgp!==null?sign(c.pnlEgp)+fmt(Math.abs(c.pnlEgp))+' ج.م':'---'}</div>
+        <div class="coin-pnl-usd ${cls}">${c.pnl!==null ? sign(c.pnl)+'$'+fmt(Math.abs(c.pnl)) : '---'}</div>
+        <div class="coin-pnl-egp">${c.pnlEgp!==null ? sign(c.pnlEgp)+fmt(Math.abs(c.pnlEgp))+' ج.م' : '---'}</div>
       </div>
-      <div class="coin-pnl-pct ${ip===null?'neutral':cls}">${c.pnlPct!==null?sign(c.pnlPct)+fmt(Math.abs(c.pnlPct),2)+'%':'---'}</div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div class="coin-pnl-pct ${ip===null?'neutral':cls}">${c.pnlPct!==null ? sign(c.pnlPct)+fmt(Math.abs(c.pnlPct),2)+'%' : '---'}</div>
+        <div class="edit-btn" onclick="openEditModal(${idx})" title="تعديل">✏️</div>
+      </div>
     </div>
   </div>`;
 }
@@ -434,58 +729,60 @@ function coinCard(c,eg) {
 // RENDER: AI SIGNALS
 // ═══════════════════════════════════════
 function renderSignals() {
-  const next=state.lastSignalUpdate?Math.max(0,300-Math.floor((Date.now()-state.lastSignalUpdate)/1000)):0;
-  const nm=Math.floor(next/60),ns=next%60;
-  const analyzeLabel=state.analyzing?'⏳ جاري التحليل...':'⚡ تحليل الآن';
+  const next = state.lastSignalUpdate ? Math.max(0, 300-Math.floor((Date.now()-state.lastSignalUpdate)/1000)) : 0;
+  const nm = Math.floor(next/60), ns = next%60;
+  const analyzeLabel = state.analyzing ? '⏳ جاري التحليل...' : '⚡ تحليل الآن';
 
-  let cards='';
-  if(!state.coins.length) {
-    cards=`<div class="empty-state"><div class="empty-icon">📭</div><div class="empty-text">أضف عملات في الإعدادات أولاً</div></div>`;
+  let cards = '';
+  if (!state.coins.length) {
+    cards = `<div class="empty-state"><div class="empty-icon">📭</div><div class="empty-text">أضف عملات في الإعدادات أولاً</div></div>`;
   } else {
-    cards=state.coins.map(c=>signalCard(c,state.signals[c.symbol])).join('');
+    cards = state.coins.map(c => signalCard(c, state.signals[c.symbol])).join('');
   }
 
   return `
     <div class="ai-header-card">
       <div class="ai-top">
-        <div class="ai-label"><span class="ai-dot"></span>🤖 تحليل AI المجاني</div>
+        <div class="ai-label"><span class="ai-dot"></span>🤖 مستشار AI المصري</div>
         <button class="ai-analyze-btn" id="analyzeBtn" ${state.analyzing?'disabled':''}>${analyzeLabel}</button>
       </div>
       <div class="ai-meta">
         آخر تحليل: <strong>${timeAgo(state.lastSignalUpdate)}</strong>
-        ${next>0?` | التالي: <strong style="color:var(--accent)">${nm}:${String(ns).padStart(2,'0')}</strong>`:''}
-        <br>يستخدم GPT-4o-mini — مجاني بلا تسجيل
+        ${next>0 ? ` | التالي: <strong style="color:var(--accent)">${nm}:${String(ns).padStart(2,'0')}</strong>` : ''}
+        <br>تحليل بالعامية المصرية — مجاني بلا تسجيل
       </div>
+      <div class="ai-disclaimer">⚠️ التحليل للاسترشاد فقط — مش نصيحة مالية رسمية.</div>
     </div>
     ${cards}`;
 }
 
-function signalCard(c,s) {
-  if(!s) return `
+function signalCard(c, s) {
+  if (!s) return `
     <div class="signal-card">
       <div class="signal-top">
-        <div class="sig-coin"><div class="sig-ava">${c.symbol.substring(0,3)}</div>
-        <div><div class="sig-sym">${c.symbol.toUpperCase()}/USDT</div><div class="sig-time">في انتظار التحليل</div></div></div>
+        <div class="sig-coin">
+          <div class="sig-ava">${c.symbol.substring(0,3)}</div>
+          <div><div class="sig-sym">${c.symbol.toUpperCase()}/USDT</div><div class="sig-time">في انتظار التحليل</div></div>
+        </div>
         <div style="font-size:24px;opacity:.3">⏳</div>
       </div>
     </div>`;
 
-  if(s.error) return `
+  if (s.error) return `
     <div class="signal-card">
       <div class="signal-top">
-        <div class="sig-coin"><div class="sig-ava" style="color:var(--loss)">${c.symbol.substring(0,3)}</div>
-        <div><div class="sig-sym">${c.symbol.toUpperCase()}/USDT</div><div class="sig-time" style="color:var(--loss)">${s.error}</div></div></div>
-        <div class="sig-time">${timeAgo(s.fetchedAt)}</div>
+        <div class="sig-coin">
+          <div class="sig-ava" style="color:var(--loss)">${c.symbol.substring(0,3)}</div>
+          <div><div class="sig-sym">${c.symbol.toUpperCase()}/USDT</div><div class="sig-time" style="color:var(--loss)">${s.error}</div></div>
+        </div>
       </div>
     </div>`;
 
-  const up=s.signal==='UP',dn=s.signal==='DOWN';
-  const cardCls=up?'up':dn?'down':'neutral';
-  const badgeCls=up?'up':dn?'down':'neutral';
-  const emoji=up?'📈':dn?'📉':'➡️';
-  const dirAr=up?'صاعد':dn?'هابط':'محايد';
-  const strAr=s.strength==='STRONG'?'قوي':s.strength==='MODERATE'?'متوسط':'ضعيف';
-  const confColor=s.confidence>=75?'var(--profit)':s.confidence>=50?'var(--gold)':'var(--loss)';
+  const up  = s.signal==='UP', dn = s.signal==='DOWN';
+  const cardCls  = up ? 'buy' : dn ? 'sell' : 'wait';
+  const emoji    = up ? '🟢 اشتري' : dn ? '🔴 بيع' : '🟡 استنى';
+  const strAr    = s.strength==='STRONG' ? 'قوي' : s.strength==='MODERATE' ? 'متوسط' : 'ضعيف';
+  const confColor= s.confidence>=75 ? 'var(--profit)' : s.confidence>=55 ? 'var(--gold)' : 'var(--loss)';
 
   return `
     <div class="signal-card ${cardCls}">
@@ -498,23 +795,23 @@ function signalCard(c,s) {
           </div>
         </div>
         <div class="sig-badge-wrap">
-          <div class="sig-main ${badgeCls}">${emoji} ${dirAr}</div>
-          <div class="sig-str">${strAr} • ${s.confidence}%</div>
+          <div class="sig-main ${cardCls}">${emoji}</div>
+          <div class="sig-str">${strAr} · ${s.confidence}% ثقة</div>
         </div>
       </div>
       <div class="sig-conf-row">
         <span class="conf-label">الثقة</span>
-        <div class="conf-track"><div class="conf-fill" style="width:${s.confidence}%;background:${confColor}"></div></div>
+        <div class="conf-track"><div class="conf-fill ${cardCls}" style="width:${s.confidence}%"></div></div>
         <span class="conf-pct" style="color:${confColor}">${s.confidence}%</span>
       </div>
-      <div class="sig-reason">${s.reason||''}</div>
-      ${s.entry?`
+      <div class="sig-reason">${s.reason || ''}</div>
+      ${s.entry ? `
       <div class="sig-levels">
         <div class="sig-level"><div class="sig-level-label">دخول</div><div class="sig-level-val neutral">$${fmtP(s.entry)}</div></div>
-        <div class="sig-level"><div class="sig-level-label">هدف</div><div class="sig-level-val ${up?'profit':'loss'}">$${fmtP(s.target)}</div></div>
-        <div class="sig-level"><div class="sig-level-label">وقف</div><div class="sig-level-val ${up?'loss':'profit'}">$${fmtP(s.stopLoss)}</div></div>
+        <div class="sig-level"><div class="sig-level-label">هدف</div><div class="sig-level-val profit">$${fmtP(s.target)}</div></div>
+        <div class="sig-level"><div class="sig-level-label">وقف</div><div class="sig-level-val loss">$${fmtP(s.stopLoss)}</div></div>
         <div class="sig-level"><div class="sig-level-label">إطار</div><div class="sig-level-val neutral">5-15د</div></div>
-      </div>`:``}
+      </div>` : ''}
     </div>`;
 }
 
@@ -524,23 +821,28 @@ function signalCard(c,s) {
 function renderSettings() {
   return `
     <div class="settings-section">
-      <div class="settings-section-title">💱 الإعدادات العامة</div>
+      <div class="settings-section-title">⚙️ الإعدادات العامة</div>
       <div class="setting-row">
         <div><div class="setting-label">سعر الدولار</div><div class="setting-sub">بالجنيه المصري</div></div>
         <input class="setting-input" id="egpInput" type="number" value="${state.usdToEgp}" step="0.5" min="1" placeholder="50">
+      </div>
+      <div class="setting-row">
+        <div><div class="setting-label">🔔 تنبيه ربح كل ($)</div><div class="setting-sub">صوت وإشعار كل ما تكسب المبلغ ده</div></div>
+        <input class="setting-input" id="alertInput" type="number" value="${state.alertAt}" step="1" min="1" placeholder="10">
       </div>
     </div>
 
     <div class="settings-section">
       <div class="settings-section-title">🪙 عملاتي (${state.coins.length})</div>
-      ${state.coins.length===0?`<div style="padding:16px;text-align:center;color:var(--text3);font-size:13px;">لا توجد عملات بعد</div>`:''}
-      ${state.coins.map((c,i)=>`
+      ${state.coins.length===0 ? `<div style="padding:16px;text-align:center;color:var(--text3);font-size:13px;">لا توجد عملات بعد</div>` : ''}
+      ${state.coins.map((c,i) => `
         <div class="coin-row-item">
           <div class="coin-row-ava">${c.symbol.substring(0,3)}</div>
           <div class="coin-row-info">
             <div class="coin-row-sym">${c.symbol.toUpperCase()}/USDT</div>
             <div class="coin-row-meta">الكمية: ${c.quantity} | شراء: $${c.avgBuy}</div>
           </div>
+          <div class="edit-btn" onclick="openEditModal(${i})">✏️</div>
           <div class="del-btn" data-del="${i}">🗑️</div>
         </div>`).join('')}
     </div>
@@ -573,9 +875,9 @@ function renderSettings() {
     <div style="background:rgba(0,229,184,.05);border:1px solid rgba(0,229,184,.15);border-radius:12px;padding:12px 14px;font-size:11px;color:var(--text3);line-height:1.9;">
       🔥 <strong style="color:#ff6d00">Firebase</strong> Realtime Database — بياناتك محفوظة على السحابة<br>
       <span id="dbStatus">🟡 جاري الاتصال...</span><br>
-      🤖 <strong style="color:var(--accent)">AI مجاني تماماً</strong> — لا يلزم أي تسجيل أو مفتاح<br>
-      🌐 يستخدم LLM7.io مع GPT-4o-mini و DeepSeek<br>
-      ⏱️ تحليل تلقائي كل <strong style="color:var(--accent)">5 دقائق</strong> من تبويب إشارات AI<br>
+      🤖 <strong style="color:var(--accent)">AI مجاني</strong> — تحليل بالعامية المصرية<br>
+      🌐 يستخدم GPT-4o-mini و DeepSeek عبر LLM7.io<br>
+      ⏱️ تحليل تلقائي كل <strong style="color:var(--accent)">5 دقائق</strong><br>
       📱 أضف التطبيق للشاشة الرئيسية لتجربة أفضل
     </div>`;
 }
@@ -584,91 +886,92 @@ function renderSettings() {
 // MAIN RENDER
 // ═══════════════════════════════════════
 function renderScreen() {
-  const el=document.getElementById('mainScreen');
-  if(!el) return;
-  switch(state.currentScreen) {
-    case 'portfolio': el.innerHTML=renderPortfolio(); break;
-    case 'signals':   el.innerHTML=renderSignals();   wireSignalsEvents(); break;
-    case 'settings':  el.innerHTML=renderSettings();  wireSettingsEvents(); break;
+  const el = document.getElementById('mainScreen');
+  if (!el) return;
+  switch (state.currentScreen) {
+    case 'portfolio': el.innerHTML = renderPortfolio(); break;
+    case 'signals':   el.innerHTML = renderSignals();   wireSignalsEvents(); break;
+    case 'settings':  el.innerHTML = renderSettings();  wireSettingsEvents(); break;
   }
 }
 
 function wireSignalsEvents() {
-  const btn=document.getElementById('analyzeBtn');
-  if(btn) btn.addEventListener('click',()=>{ runAllSignals(); });
+  const btn = document.getElementById('analyzeBtn');
+  if (btn) btn.addEventListener('click', () => runAllSignals());
 }
 
 function wireSettingsEvents() {
-  // Delete coin buttons
-  document.querySelectorAll('[data-del]').forEach(btn=>{
-    btn.addEventListener('click',()=>{
-      const i=parseInt(btn.dataset.del);
-      const sym=state.coins[i].symbol;
-      state.coins.splice(i,1);
+  document.querySelectorAll('[data-del]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const i   = parseInt(btn.dataset.del);
+      const sym = state.coins[i].symbol;
+      state.coins.splice(i, 1);
       delete state.signals[sym];
       save(); renderScreen();
-      toast(`تم حذف ${sym}`);
+      toast('تم حذف ' + sym);
     });
   });
 
-  // Add coin
-  const addBtn=document.getElementById('addCoinBtn');
-  if(addBtn) addBtn.addEventListener('click',addCoin);
+  const addBtn = document.getElementById('addCoinBtn');
+  if (addBtn) addBtn.addEventListener('click', addCoin);
 
-  // Save settings
-  const saveBtn=document.getElementById('saveSettingsBtn');
-  if(saveBtn) saveBtn.addEventListener('click',saveSettingsHandler);
+  const saveBtn = document.getElementById('saveSettingsBtn');
+  if (saveBtn) saveBtn.addEventListener('click', saveSettingsHandler);
 
-  // Symbol uppercase
-  const symInput=document.getElementById('fSymbol');
-  if(symInput) symInput.addEventListener('input',e=>{ e.target.value=e.target.value.toUpperCase(); });
+  const symInput = document.getElementById('fSymbol');
+  if (symInput) symInput.addEventListener('input', e => { e.target.value = e.target.value.toUpperCase(); });
 }
 
 function addCoin() {
-  const symbol=(document.getElementById('fSymbol')?.value||'').trim().toUpperCase();
-  const quantity=(document.getElementById('fQty')?.value||'').trim();
-  const avgBuy=(document.getElementById('fAvg')?.value||'').trim();
-  if(!symbol) return toast('أدخل رمز العملة',true);
-  if(!quantity||isNaN(quantity)||+quantity<=0) return toast('أدخل الكمية',true);
-  if(!avgBuy||isNaN(avgBuy)||+avgBuy<=0) return toast('أدخل سعر الشراء',true);
-  const exists=state.coins.findIndex(c=>c.symbol===symbol);
-  if(exists>=0) { state.coins[exists]={symbol,quantity,avgBuy}; toast(`تم تحديث ${symbol} ✅`); }
-  else          { state.coins.push({symbol,quantity,avgBuy});   toast(`تمت إضافة ${symbol} ✅`); }
+  const symbol  = (document.getElementById('fSymbol')?.value||'').trim().toUpperCase();
+  const quantity = (document.getElementById('fQty')?.value||'').trim();
+  const avgBuy   = (document.getElementById('fAvg')?.value||'').trim();
+  if (!symbol)                              return toast('أدخل رمز العملة', true);
+  if (!quantity||isNaN(quantity)||+quantity<=0) return toast('أدخل الكمية', true);
+  if (!avgBuy  ||isNaN(avgBuy)  ||+avgBuy<=0)  return toast('أدخل سعر الشراء', true);
+  const exists = state.coins.findIndex(c => c.symbol === symbol);
+  if (exists >= 0) { state.coins[exists] = { symbol, quantity, avgBuy }; toast('تم تحديث ' + symbol + ' ✅'); }
+  else             { state.coins.push({ symbol, quantity, avgBuy });      toast('تمت إضافة ' + symbol + ' ✅'); }
+  // clear form
+  ['fSymbol','fQty','fAvg'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
   save(); renderScreen();
 }
 
 function saveSettingsHandler() {
-  const v=parseFloat(document.getElementById('egpInput')?.value||50);
-  if(!isNaN(v)&&v>0) state.usdToEgp=v;
-  save(); toast('تم الحفظ ✅');
-  setTimeout(()=>renderScreen(),800);
+  const egp   = parseFloat(document.getElementById('egpInput')?.value  || 50);
+  const alert = parseFloat(document.getElementById('alertInput')?.value || 10);
+  if (!isNaN(egp)   && egp   > 0) state.usdToEgp = egp;
+  if (!isNaN(alert) && alert > 0) { state.alertAt = alert; state.alertFired = {}; }
+  save();
+  toast('تم الحفظ ✅');
+  setTimeout(() => renderScreen(), 800);
 }
 
 // ═══════════════════════════════════════
 // TOAST
 // ═══════════════════════════════════════
-function toast(msg,isErr=false) {
-  const t=document.getElementById('toast');
-  t.textContent=msg;
-  t.className='toast'+(isErr?' err':'');
-  setTimeout(()=>t.classList.add('show'),10);
-  setTimeout(()=>t.classList.remove('show'),2500);
+function toast(msg, isErr=false, isGold=false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast' + (isErr?' err':'') + (isGold?' gold':'');
+  setTimeout(() => t.classList.add('show'), 10);
+  setTimeout(() => t.classList.remove('show'), 3000);
 }
 
 // ═══════════════════════════════════════
 // NAVIGATION
 // ═══════════════════════════════════════
 function initNav() {
-  document.querySelectorAll('.nav-btn').forEach(btn=>{
-    btn.addEventListener('click',()=>{
-      document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      state.currentScreen=btn.dataset.screen;
+      state.currentScreen = btn.dataset.screen;
       renderScreen();
     });
   });
-  document.getElementById('refreshBtn')?.addEventListener('click',async ()=>{
-    const btn=document.getElementById('refreshBtn');
+  document.getElementById('refreshBtn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('refreshBtn');
     btn.classList.add('spin');
     await refreshPrices();
     btn.classList.remove('spin');
@@ -681,21 +984,18 @@ function initNav() {
 // AUTO REFRESH
 // ═══════════════════════════════════════
 function startAutoRefresh() {
-  // Prices every 3 seconds
-  setInterval(async()=>{
+  setInterval(async () => {
     await refreshPrices();
-    if(state.currentScreen==='portfolio') renderScreen();
+    if (state.currentScreen === 'portfolio') renderScreen();
   }, 3000);
 
-  // AI signals every 5 minutes
-  setInterval(()=>{
-    const age=state.lastSignalUpdate?Date.now()-state.lastSignalUpdate:Infinity;
-    if(age>5*60*1000) runAllSignals();
+  setInterval(() => {
+    const age = state.lastSignalUpdate ? Date.now()-state.lastSignalUpdate : Infinity;
+    if (age > 5*60*1000) runAllSignals();
   }, 60*1000);
 
-  // Countdown timer in signals tab
-  setInterval(()=>{
-    if(state.currentScreen==='signals'&&!state.analyzing) renderScreen();
+  setInterval(() => {
+    if (state.currentScreen === 'signals' && !state.analyzing) renderScreen();
   }, 10000);
 }
 
@@ -703,25 +1003,29 @@ function startAutoRefresh() {
 // SERVICE WORKER
 // ═══════════════════════════════════════
 function registerSW() {
-  if('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
   }
 }
 
 // ═══════════════════════════════════════
 // BOOT
 // ═══════════════════════════════════════
-window.addEventListener('DOMContentLoaded', async ()=>{
-  load();           // instant boot from localStorage
+window.addEventListener('DOMContentLoaded', async () => {
+  load();
   initNav();
   renderScreen();
-  initFirebase();   // connect Firebase (live listener will update state)
+  initFirebase();
   await refreshPrices();
   renderScreen();
   startAutoRefresh();
   registerSW();
 
-  // Auto-run AI if data is stale
+  // طلب إذن الإشعارات
+  if ('Notification' in window && Notification.permission === 'default')
+    setTimeout(() => Notification.requestPermission(), 2000);
+
+  // Auto-run AI لو البيانات قديمة
   const age = state.lastSignalUpdate ? Date.now()-state.lastSignalUpdate : Infinity;
   if (age > 5*60*1000 && state.coins.length > 0) {
     setTimeout(runAllSignals, 3000);
