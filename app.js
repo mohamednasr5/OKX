@@ -1,4 +1,4 @@
-// OKX Tracker PWA - app.js
+// OKX Tracker PWA - app.js 
 'use strict';
 
 // ═══════════════════════════════════════
