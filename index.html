@@ -780,20 +780,23 @@ async function runAIAnalysis(coins, prices, changes, egpRate, selectedCoin) {
     };
   });
 
-  const prompt = `أنت "أستاذ كريبتو" — مستشار عملات رقمية مصري خبير وصريح جداً. بتتكلم عامية مصرية 100% زي صاحب بيكلم صاحبه.
+  const systemPrompt = `أنت "أستاذ كريبتو". قواعد صارمة جداً:
+١- تتكلم عامية مصرية 100% في كل كلمة — ممنوع أي إنجليزي في الشرح إطلاقاً.
+٢- ممنوع تكتب أي جملة بالإنجليزي زي "Price is below SMA" أو "RSI is low" — قول ده بالعربي المصري.
+٣- لازم تشرح إيه اللي بيحصل في السوق، وضع المستخدم، وتوصيتك — كلها بالعامية المصرية.
+٤- ابعت JSON فقط بدون أي نص تاني.`;
 
-بيانات محفظة المستخدم على OKX:
+  const userPrompt = `بيانات محفظة المستخدم على OKX:
 ${JSON.stringify(portfolioData, null, 2)}
 
 سعر الدولار: ${egpRate} جنيه مصري
 
-== تعليمات مهمة ==
-• لو currentPrice موجود → استخدمه في تحليلك.
-• لو currentPrice = null → حلل بمعرفتك بالسوق وطبيعة العملة. لا تقول "مش عارف" أو "السعر مش متاح" أبداً.
-• لكل عملة اشرح: (١) إيه اللي بيحصل في السوق دلوقتي لهذه العملة (٢) وضع المستخدم (٣) توصيتك الصريحة.
-• اذكر الأرقام بالجنيه المصري.
+== مطلوب منك ==
+• لو currentPrice موجود → استخدمه.
+• لو currentPrice = null → حلل بمعرفتك بالعملة ولا تقول "مش عارف" أبداً.
+• لكل عملة اشرح بالعامية المصرية: (١) إيه اللي بيحصل في السوق دلوقتي (٢) وضع المستخدم بالأرقام بالجنيه (٣) توصيتك الصريحة.
 
-ابعت JSON فقط:
+ابعت JSON بالشكل ده بالظبط:
 {
   "signals": [
     {
@@ -802,7 +805,7 @@ ${JSON.stringify(portfolioData, null, 2)}
       "decision": "buy",
       "strength": "قوي",
       "confidence": 80,
-      "reason": "٣-٤ جمل عامية مصرية تصف السوق ووضع المستخدم والتوصية",
+      "reason": "مثال: البيتكوين دلوقتي بيتحرك في منطقة تراكم قوية وكسر مستوى مقاومة مهم. إنت شايل من 62 ألف يعني لو وصل 70 ألف هتكسب حوالي 3200 جنيه تقريباً. توصيتي استنى تأكيد الكسر وبعدين اشتري.",
       "entry": "63000",
       "tp1": "68000",
       "tp2": "75000",
@@ -811,7 +814,7 @@ ${JSON.stringify(portfolioData, null, 2)}
   ]
 }
 
-قواعد: عامية مصرية 100% — reason ٣ جمل على الأقل — decision: buy/sell/wait — strength: قوي/متوسط/ضعيف — confidence 55-92 — أرقام دولار كـ string — JSON فقط بدون أي نص خارجه`;
+تذكر: عامية مصرية 100% — ممنوع إنجليزي في reason — ٣ جمل على الأقل — JSON فقط`;
 
   const resp = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -819,7 +822,8 @@ ${JSON.stringify(portfolioData, null, 2)}
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 2000,
-      messages: [{ role: 'user', content: prompt }]
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }]
     })
   });
   const data = await resp.json();
