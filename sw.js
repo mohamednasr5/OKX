@@ -15,8 +15,10 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-  if (e.request.url.includes('okx.com') || e.request.url.includes('llm7.io') || e.request.url.includes('fonts.googleapis')) {
-    return; // never cache API calls
+  if (e.request.url.includes('okx.com') || e.request.url.includes('llm7.io') || 
+      e.request.url.includes('firebaseio.com') || e.request.url.includes('googleapis.com') ||
+      e.request.url.includes('gstatic.com') || e.request.url.includes('fonts.google')) {
+    return; // never cache API/Firebase calls
   }
   e.respondWith(
     caches.match(e.request).then(r => r || fetch(e.request))
