@@ -486,6 +486,95 @@ html, body {
 .spin { animation:spinr 1s linear infinite; display:inline-block; }
 @keyframes spinr { to { transform:rotate(360deg); } }
 
+/* EDIT MODAL */
+.modal-backdrop {
+  position:fixed; inset:0; z-index:200;
+  background:rgba(7,11,20,.85); backdrop-filter:blur(10px);
+  display:flex; align-items:flex-end; justify-content:center;
+  opacity:0; transition:opacity .25s;
+  pointer-events:none;
+}
+.modal-backdrop.open { opacity:1; pointer-events:all; }
+.modal-sheet {
+  width:100%; max-width:480px;
+  background:var(--card); border:1px solid var(--border);
+  border-radius:20px 20px 0 0;
+  padding:0 0 calc(16px + var(--safe-bottom));
+  transform:translateY(100%); transition:transform .3s cubic-bezier(.34,1.1,.64,1);
+  max-height:90vh; overflow-y:auto;
+}
+.modal-backdrop.open .modal-sheet { transform:translateY(0); }
+.modal-handle {
+  width:36px; height:4px; border-radius:2px;
+  background:var(--border); margin:12px auto 0;
+}
+.modal-header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:16px 18px 14px;
+  border-bottom:1px solid var(--border);
+}
+.modal-title { font-size:16px; font-weight:900; }
+.modal-close {
+  width:32px; height:32px; border-radius:8px;
+  background:var(--card2); border:1px solid var(--border);
+  display:flex; align-items:center; justify-content:center;
+  font-size:16px; cursor:pointer; transition:all .2s;
+}
+.modal-close:active { transform:scale(.9); }
+.modal-body { padding:16px 18px; display:flex; flex-direction:column; gap:14px; }
+.modal-coin-info {
+  display:flex; align-items:center; gap:12px;
+  padding:12px 14px; background:rgba(0,229,184,.05);
+  border:1px solid rgba(0,229,184,.15); border-radius:12px;
+}
+.modal-coin-ava {
+  width:44px; height:44px; border-radius:50%;
+  background:linear-gradient(135deg, var(--card2), var(--border));
+  border:1px solid var(--border);
+  display:flex; align-items:center; justify-content:center;
+  font-size:13px; font-weight:700; color:var(--accent);
+  font-family:'JetBrains Mono',monospace; flex-shrink:0;
+}
+.modal-coin-sym { font-size:18px; font-weight:900; }
+.modal-coin-pair { font-size:12px; color:var(--text3); margin-top:2px; }
+.modal-field label {
+  font-size:10px; color:var(--text3); font-weight:700;
+  text-transform:uppercase; letter-spacing:.6px; display:block; margin-bottom:6px;
+}
+.modal-field input {
+  width:100%; background:var(--card2); border:1px solid var(--border);
+  border-radius:10px; padding:12px 14px; color:var(--text);
+  font-family:'JetBrains Mono',monospace; font-size:15px; outline:none;
+  text-align:left; direction:ltr; transition:border-color .2s;
+}
+.modal-field input:focus { border-color:var(--accent); }
+.modal-field-hint { font-size:10px; color:var(--text3); margin-top:5px; }
+.modal-actions { display:grid; grid-template-columns:1fr 1fr; gap:10px; padding:0 18px 10px; }
+.modal-save-btn {
+  background:linear-gradient(135deg, var(--accent), var(--accent2));
+  color:#000; border:none; border-radius:12px;
+  padding:14px; font-size:15px; font-weight:900;
+  cursor:pointer; font-family:'Tajawal',sans-serif; transition:all .2s;
+}
+.modal-save-btn:active { transform:scale(.96); opacity:.85; }
+.modal-del-btn {
+  background:rgba(255,61,90,.1); border:1px solid rgba(255,61,90,.25);
+  color:var(--loss); border-radius:12px;
+  padding:14px; font-size:14px; font-weight:700;
+  cursor:pointer; font-family:'Tajawal',sans-serif; transition:all .2s;
+}
+.modal-del-btn:active { transform:scale(.96); background:rgba(255,61,90,.2); }
+.modal-divider { height:1px; background:var(--border); margin:0 18px; }
+
+/* coin-row edit button */
+.edit-btn {
+  width:32px; height:32px; border-radius:8px;
+  background:rgba(0,136,255,.1); border:1px solid rgba(0,136,255,.2);
+  display:flex; align-items:center; justify-content:center;
+  font-size:14px; cursor:pointer; transition:all .2s; margin-left:6px;
+}
+.edit-btn:active { transform:scale(.88); }
+
 /* Loading overlay */
 .loading-overlay {
   position:fixed; inset:0; z-index:100;
@@ -538,6 +627,41 @@ html, body {
     <button class="nav-btn" data-screen="settings">
       <span class="nav-icon">⚙️</span>إعدادات
     </button>
+  </div>
+</div>
+
+<!-- EDIT MODAL -->
+<div class="modal-backdrop" id="editModal" onclick="closeEditModal(event)">
+  <div class="modal-sheet" id="editSheet">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <div class="modal-title">✏️ تعديل العملة</div>
+      <div class="modal-close" onclick="closeEditModal()">✕</div>
+    </div>
+    <div class="modal-body">
+      <div class="modal-coin-info">
+        <div class="modal-coin-ava" id="editAva">BTC</div>
+        <div>
+          <div class="modal-coin-sym" id="editSymLabel">Bitcoin</div>
+          <div class="modal-coin-pair" id="editPairLabel">BTC/USDT</div>
+        </div>
+      </div>
+      <div class="modal-field">
+        <label>الكمية</label>
+        <input id="editQty" type="number" step="any" placeholder="مثال: 0.5">
+        <div class="modal-field-hint">عدد الوحدات اللي عندك من العملة دي</div>
+      </div>
+      <div class="modal-field">
+        <label>متوسط سعر الشراء (USD)</label>
+        <input id="editAvg" type="number" step="any" placeholder="مثال: 45000">
+        <div class="modal-field-hint">متوسط السعر اللي اشتريت بيه</div>
+      </div>
+    </div>
+    <div class="modal-divider"></div>
+    <div class="modal-actions">
+      <button class="modal-save-btn" onclick="saveEdit()">💾 حفظ التعديل</button>
+      <button class="modal-del-btn" onclick="deleteFromModal()">🗑️ حذف العملة</button>
+    </div>
   </div>
 </div>
 
@@ -901,51 +1025,62 @@ async function runAnalysis() {
     return {
       symbol: c.sym,
       id: c.id,
-      currentPrice: price || 'غير متاح',
+      currentPrice: price ? price : null,
       avgBuyPrice: c.avgBuy,
       quantity: c.qty,
-      portfolioValue: val ? fmtK(val)+' USD' : 'غير متاح',
-      costBasis: fmtK(cost)+' USD',
-      pnlUSD: pnl !== null ? (pnl>=0?'+':'')+fmtK(pnl)+' USD' : 'غير متاح',
-      pnlPercent: pnlPct !== null ? pct(pnlPct) : 'غير متاح',
-      change24h: change !== null ? pct(change) : 'غير متاح',
+      portfolioValueUSD: val ? +val.toFixed(2) : null,
+      costBasisUSD: +cost.toFixed(2),
+      pnlUSD: pnl !== null ? +pnl.toFixed(2) : null,
+      pnlPercent: pnlPct !== null ? +pnlPct.toFixed(2) : null,
+      pnlEGP: pnl !== null ? +(pnl * state.egpRate).toFixed(0) : null,
+      change24hPercent: change !== null ? +change.toFixed(2) : null,
     };
   });
 
-  const prompt = `أنت مستشار مالي متخصص في العملات الرقمية. بتتكلم بالعامية المصرية وبتكون صريح وواضح.
+  const prompt = `أنت مستشار مالي خبير في تحليل العملات الرقمية. اسمك "أستاذ كريبتو" وبتتكلم بالعامية المصرية الصريحة زي صاحب بيعرف.
 
-البيانات دي من محفظة المستخدم على OKX:
+دي بيانات محفظة المستخدم الحقيقية من OKX:
 ${JSON.stringify(portfolioData, null, 2)}
 
-سعر الدولار: ${state.egpRate} جنيه مصري
+سعر الدولار دلوقتي: ${state.egpRate} جنيه مصري
 
-مطلوب منك تحلل كل عملة بالتفصيل وتقول توصيتك بوضوح.
+== مهم جداً ==
+لو currentPrice فيها قيمة → استخدمها في تحليلك.
+لو currentPrice = null → استخدم معرفتك بالسوق وخبرتك عشان تحلل العملة بناءً على avgBuyPrice وطبيعة العملة ومعلوماتك — ومتقولش أبداً "السعر مش متاح" أو "مش عارف". لازم تدي رأيك وتحلل.
 
-لكل عملة، ابعت JSON زي ده بالظبط (بدون أي نص تاني):
+لكل عملة اكتب تحليل حقيقي بالعامي المصري يشمل:
+١- إيه اللي بيحصل في العملة دي دلوقتي في السوق
+٢- وضع المستخدم فيها (ربحان ولا خسران ولا برلا)
+٣- توصيتك الصريحة: اشتري / بيع / استنى — وليه
+٤- أرقام واضحة: دخول، هدف ١، هدف ٢، وقف خسارة
+
+الرد لازم يكون JSON فقط بالشكل ده بالظبط:
 {
   "signals": [
     {
       "coinId": "BTC-USDT",
       "sym": "BTC",
-      "decision": "buy" | "sell" | "wait",
-      "strength": "قوي" | "متوسط" | "ضعيف",
-      "confidence": 75,
-      "reason": "شرح مصري بالتفصيل - لازم تبدأ بجملة تلخص القرار مباشرة وتشرح السبب بالعامية المصرية الواضحة",
-      "entry": "سعر الدخول المقترح أو null",
-      "tp1": "هدف أول أو null",
-      "tp2": "هدف تاني أو null",
-      "sl": "وقف الخسارة أو null"
+      "decision": "buy",
+      "strength": "قوي",
+      "confidence": 82,
+      "reason": "البيتكوين دلوقتي في مرحلة تجميع قوية بعد ما كسر مستوى المقاومة عند 65k. السوق الكبير بيشتري وده علامة صعود. إنت كده شايل من 62k يعني لو صعد لـ70k هتاخد ربح ~13% يعني حوالي X جنيه. توصيتي: استنى شوية وتأكد من الكسر، ولو اشتريت تاني خلي الكمية صغيرة.",
+      "entry": "63500",
+      "tp1": "68000",
+      "tp2": "74000",
+      "sl": "59000"
     }
   ]
 }
 
-قواعد مهمة:
-- الكلام عامية مصرية 100% - مش فصحى
-- كن صريح ومباشر: "اشتري دلوقتي" أو "بيع فوراً" أو "استنى وما تدخلش"
-- اشرح الـ P&L بالجنيه المصري كمان
-- لو العملة خسرانة كتير وضح هل يكمل يمسك أو يقطع الخسارة
-- confidence بين 50 و 95
-- ابعت JSON فقط بدون أي تعليق`;
+قواعد صارمة:
+- عامية مصرية 100% — مفيش فصحى خالص
+- reason لازم تبدأ بوصف السوق والعملة دلوقتي، وبعدين وضع المستخدم، وبعدين التوصية
+- reason لازم تكون ٣ أو ٤ جمل على الأقل ومفيش "غير متاح" أو "مش عارف" أبداً
+- اذكر الأرباح أو الخسائر بالجنيه المصري لو عندك البيانات
+- entry و tp1 و tp2 و sl كلها أرقام دولار كـ string (مش null)
+- confidence بين 55 و 92
+- ابعت JSON نظيف بدون أي نص قبله أو بعده`;
+
 
   // Show loading skeleton in signals screen
   const signalsEl = $('screenSignals');
@@ -1013,6 +1148,7 @@ function renderSettings() {
         <div class="coin-row-sym">${c.sym}</div>
         <div class="coin-row-meta">الكمية: ${c.qty} · متوسط: $${fmtK(c.avgBuy)}</div>
       </div>
+      <div class="edit-btn" onclick="openEditModal(${i})" title="تعديل">✏️</div>
       <div class="del-btn" onclick="deleteCoin(${i})">🗑️</div>
     </div>`).join('');
 
@@ -1102,6 +1238,61 @@ function deleteCoin(i) {
   renderPortfolio();
   showToast(`🗑️ تم حذف ${c.sym}`);
 }
+
+// ════════════════════════════════════════════════════
+//  EDIT MODAL
+// ════════════════════════════════════════════════════
+let _editIdx = null;
+
+function openEditModal(idx) {
+  _editIdx = idx;
+  const c = state.coins[idx];
+  $('editAva').textContent       = c.sym.slice(0,3);
+  $('editSymLabel').textContent  = c.sym;
+  $('editPairLabel').textContent = c.pair;
+  $('editQty').value             = c.qty;
+  $('editAvg').value             = c.avgBuy;
+  $('editModal').classList.add('open');
+  setTimeout(() => $('editQty').focus(), 350);
+}
+
+function closeEditModal(e) {
+  if (e && e.target !== $('editModal')) return;
+  $('editModal').classList.remove('open');
+  _editIdx = null;
+}
+
+function saveEdit() {
+  if (_editIdx === null) return;
+  const qty = parseFloat($('editQty').value);
+  const avg = parseFloat($('editAvg').value);
+  if (!qty || qty <= 0) { showToast('⚠️ الكمية لازم تكون أكبر من صفر!', true); return; }
+  if (!avg || avg <= 0) { showToast('⚠️ سعر الشراء لازم يكون صحيح!', true); return; }
+
+  state.coins[_editIdx].qty    = qty;
+  state.coins[_editIdx].avgBuy = avg;
+  saveCoins();
+  $('editModal').classList.remove('open');
+  _editIdx = null;
+  renderSettings();
+  renderPortfolio();
+  showToast('✅ تم حفظ التعديل!');
+}
+
+function deleteFromModal() {
+  if (_editIdx === null) return;
+  const sym = state.coins[_editIdx].sym;
+  state.coins.splice(_editIdx, 1);
+  saveCoins();
+  $('editModal').classList.remove('open');
+  _editIdx = null;
+  renderSettings();
+  renderPortfolio();
+  showToast(`🗑️ تم حذف ${sym}`);
+}
+
+// close on ESC
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeEditModal(); });
 
 // ════════════════════════════════════════════════════
 //  NAVIGATION
