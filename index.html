@@ -7,318 +7,620 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="OKX Tracker">
-<meta name="theme-color" content="#070b14">
+<meta name="theme-color" content="#0a0e1a">
 <title>OKX Tracker</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
 <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg:#070b14; --bg2:#0d1420; --card:#111c2e; --card2:#162035;
-  --border:#1a2840; --accent:#00e5b8; --accent2:#0088ff; --accent3:#7c3aed;
-  --profit:#00d68f; --loss:#ff3d5a; --gold:#fbbf24;
-  --text:#e2eeff; --text2:#7a95c0; --text3:#3d5278;
-  --r:16px;
-  --safe-top:env(safe-area-inset-top,0px);
-  --safe-bottom:env(safe-area-inset-bottom,0px);
+  --bg: #070b14;
+  --bg2: #0d1420;
+  --card: #111c2e;
+  --card2: #162035;
+  --border: #1a2840;
+  --accent: #00e5b8;
+  --accent2: #0088ff;
+  --accent3: #7c3aed;
+  --profit: #00d68f;
+  --loss: #ff3d5a;
+  --gold: #fbbf24;
+  --text: #e2eeff;
+  --text2: #7a95c0;
+  --text3: #3d5278;
+  --r: 16px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
-*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{width:100%;height:100%;background:var(--bg);color:var(--text);font-family:'Tajawal',sans-serif;overflow:hidden;user-select:none}
-#app{display:flex;flex-direction:column;height:100vh;height:100dvh;
-  padding-top:var(--safe-top);padding-bottom:var(--safe-bottom);
-  background:radial-gradient(ellipse at 20% 0%,rgba(0,229,184,.07) 0%,transparent 50%),
-             radial-gradient(ellipse at 80% 100%,rgba(0,136,255,.05) 0%,transparent 50%),var(--bg)}
 
-/* TOP BAR */
-.top-bar{display:flex;align-items:center;justify-content:space-between;padding:14px 18px 10px;
-  background:rgba(7,11,20,.92);backdrop-filter:blur(20px);border-bottom:1px solid var(--border);
-  flex-shrink:0;position:relative;z-index:10}
-.top-bar::after{content:'';position:absolute;bottom:0;left:0;right:0;height:1px;
-  background:linear-gradient(90deg,transparent,var(--accent),transparent);opacity:.4}
-.brand{display:flex;align-items:center;gap:10px}
-.brand-icon{width:36px;height:36px;background:linear-gradient(135deg,var(--accent),var(--accent2));
-  border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 0 20px rgba(0,229,184,.3)}
-.brand-name{font-size:18px;font-weight:900;letter-spacing:-.5px}
-.brand-name span{background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.top-actions{display:flex;align-items:center;gap:8px}
-.live-pill{display:flex;align-items:center;gap:5px;background:rgba(0,214,143,.1);border:1px solid rgba(0,214,143,.25);
-  border-radius:20px;padding:4px 10px;font-size:11px;font-weight:700;color:var(--profit)}
-.pulse{width:6px;height:6px;border-radius:50%;background:var(--profit);animation:pulse 1.4s infinite}
-@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.3;transform:scale(.6)}}
-.icon-btn{width:34px;height:34px;background:var(--card);border:1px solid var(--border);
-  border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;cursor:pointer;transition:all .2s}
-.icon-btn:active{transform:scale(.9);background:var(--card2)}
+* { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
 
-/* SCROLL */
-.scroll-area{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;
-  padding:14px 14px 20px;display:flex;flex-direction:column;gap:12px}
-.scroll-area::-webkit-scrollbar{display:none}
-.screen{display:none}
-.screen.active{display:flex;flex-direction:column;gap:12px}
+html, body {
+  width:100%; height:100%;
+  background:var(--bg);
+  color:var(--text);
+  font-family:'Tajawal', sans-serif;
+  overflow:hidden;
+  user-select:none;
+}
 
-/* SUMMARY */
-.summary-card{background:linear-gradient(135deg,#0f1e35 0%,#0d1a2e 100%);border:1px solid var(--border);
-  border-radius:var(--r);padding:18px;position:relative;overflow:hidden}
-.summary-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;
-  background:linear-gradient(90deg,var(--accent),var(--accent2),var(--accent3))}
-.summary-card::after{content:'';position:absolute;top:-60px;right:-60px;width:180px;height:180px;
-  background:radial-gradient(circle,rgba(0,229,184,.07),transparent 70%);pointer-events:none}
-.summary-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px}
-.summary-label{font-size:11px;color:var(--text3);font-weight:500;text-transform:uppercase;letter-spacing:.8px}
-.total-value{font-family:'JetBrains Mono',monospace;font-size:30px;font-weight:700;line-height:1.1;margin-top:4px}
-.total-egp{font-size:13px;color:var(--text2);margin-top:3px;font-family:'JetBrains Mono',monospace}
-.pnl-badge{display:flex;flex-direction:column;align-items:flex-end;gap:3px}
-.pnl-pct-big{font-size:20px;font-weight:900;font-family:'JetBrains Mono',monospace;padding:4px 12px;border-radius:10px}
-.pnl-pct-big.profit{background:rgba(0,214,143,.15);color:var(--profit)}
-.pnl-pct-big.loss{background:rgba(255,61,90,.12);color:var(--loss)}
-.pnl-abs{font-size:11px;color:var(--text2);font-family:'JetBrains Mono',monospace}
-.summary-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:4px}
-.sum-stat{background:rgba(255,255,255,.03);border-radius:10px;padding:10px}
-.sum-stat-label{font-size:10px;color:var(--text3);margin-bottom:4px}
-.sum-stat-val{font-size:13px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--text)}
-.sum-stat-sub{font-size:10px;color:var(--text3);margin-top:2px}
+/* ═══════════════════════════════════════
+   LAYOUT
+═══════════════════════════════════════ */
+#app {
+  display:flex; flex-direction:column;
+  height:100vh; height:100dvh;
+  padding-top:var(--safe-top);
+  padding-bottom:var(--safe-bottom);
+  background: radial-gradient(ellipse at 20% 0%, rgba(0,229,184,.06) 0%, transparent 50%),
+              radial-gradient(ellipse at 80% 100%, rgba(0,136,255,.05) 0%, transparent 50%),
+              var(--bg);
+}
 
-/* PROFIT ALERT BANNER */
-.profit-alert-banner{display:flex;align-items:center;gap:12px;
-  background:linear-gradient(135deg,rgba(0,214,143,.18),rgba(0,229,184,.08));
-  border:1.5px solid rgba(0,214,143,.45);border-radius:14px;padding:14px 16px;
-  animation:alertPop .5s cubic-bezier(.34,1.56,.64,1);position:relative;overflow:hidden}
-.profit-alert-banner::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;
-  background:linear-gradient(90deg,var(--profit),var(--accent));animation:scanline 2s linear infinite}
-@keyframes scanline{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
-@keyframes alertPop{0%{transform:scale(.9);opacity:0}100%{transform:scale(1);opacity:1}}
-.alert-icon{font-size:28px;animation:abounce 1s ease infinite}
-@keyframes abounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
-.alert-text-big{font-size:16px;font-weight:900;color:var(--profit)}
-.alert-text-sub{font-size:12px;color:var(--text2);margin-top:3px}
-.alert-close{position:absolute;top:8px;left:10px;font-size:16px;color:var(--text3);cursor:pointer;padding:4px}
+/* ═══════════════════════════════════════
+   HEADER
+═══════════════════════════════════════ */
+.top-bar {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:14px 18px 10px;
+  background:rgba(7,11,20,.9);
+  backdrop-filter:blur(20px);
+  border-bottom:1px solid var(--border);
+  flex-shrink:0;
+  position:relative;
+  z-index:10;
+}
+.top-bar::after {
+  content:'';
+  position:absolute; bottom:0; left:0; right:0; height:1px;
+  background:linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity:.4;
+}
+.brand { display:flex; align-items:center; gap:10px; }
+.brand-icon {
+  width:36px; height:36px;
+  background:linear-gradient(135deg, var(--accent), var(--accent2));
+  border-radius:10px;
+  display:flex; align-items:center; justify-content:center;
+  font-size:18px;
+  box-shadow: 0 0 20px rgba(0,229,184,.3);
+}
+.brand-name { font-size:18px; font-weight:900; letter-spacing:-.5px; }
+.brand-name span { background:linear-gradient(135deg,var(--accent),var(--accent2)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+.top-actions { display:flex; align-items:center; gap:8px; }
+.live-pill {
+  display:flex; align-items:center; gap:5px;
+  background:rgba(0,214,143,.1);
+  border:1px solid rgba(0,214,143,.25);
+  border-radius:20px; padding:4px 10px;
+  font-size:11px; font-weight:700; color:var(--profit);
+}
+.pulse { width:6px; height:6px; border-radius:50%; background:var(--profit); animation:pulse 1.4s infinite; }
+@keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.3;transform:scale(.6)} }
+.icon-btn {
+  width:34px; height:34px;
+  background:var(--card); border:1px solid var(--border);
+  border-radius:9px;
+  display:flex; align-items:center; justify-content:center;
+  font-size:16px; cursor:pointer;
+  transition:all .2s;
+}
+.icon-btn:active { transform:scale(.9); background:var(--card2); }
 
-/* RATE STRIP */
-.rate-strip{display:flex;align-items:center;justify-content:space-between;
-  background:var(--card);border:1px solid var(--border);border-radius:10px;padding:8px 14px}
-.rate-strip-label{font-size:11px;color:var(--text3)}
-.rate-strip-val{font-size:13px;font-weight:700;color:var(--gold);font-family:'JetBrains Mono',monospace}
-.rate-strip-time{font-size:10px;color:var(--text3)}
+/* ═══════════════════════════════════════
+   SCROLL AREA
+═══════════════════════════════════════ */
+.scroll-area {
+  flex:1; overflow-y:auto; overflow-x:hidden;
+  -webkit-overflow-scrolling:touch;
+  padding:14px 14px 20px;
+  display:flex; flex-direction:column; gap:12px;
+}
+.scroll-area::-webkit-scrollbar { display:none; }
 
-/* SECTION */
-.section-title{font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:1px;
-  display:flex;align-items:center;justify-content:space-between}
-.section-count{background:var(--card2);border:1px solid var(--border);border-radius:20px;padding:2px 8px;font-size:10px;color:var(--text2)}
+/* ═══════════════════════════════════════
+   PROFIT ALERT BANNER
+═══════════════════════════════════════ */
+.profit-alert-banner {
+  display:flex; align-items:center; gap:12px;
+  background:linear-gradient(135deg, rgba(0,214,143,.18), rgba(0,229,184,.08));
+  border:1.5px solid rgba(0,214,143,.45);
+  border-radius:14px; padding:14px 16px;
+  animation:alertPop .5s cubic-bezier(.34,1.56,.64,1);
+  position:relative; overflow:hidden;
+}
+.profit-alert-banner::before {
+  content:''; position:absolute; top:0; left:0; right:0; height:2px;
+  background:linear-gradient(90deg, var(--profit), var(--accent));
+  animation:scanline 2s linear infinite;
+}
+@keyframes scanline { 0%{transform:translateX(-100%)} 100%{transform:translateX(100%)} }
+@keyframes alertPop { 0%{transform:scale(.9);opacity:0} 100%{transform:scale(1);opacity:1} }
+.alert-icon { font-size:28px; animation:abounce 1s ease infinite; }
+@keyframes abounce { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-4px)} }
+.alert-text-big { font-size:16px; font-weight:900; color:var(--profit); }
+.alert-text-sub { font-size:12px; color:var(--text2); margin-top:3px; }
+.alert-close { position:absolute; top:8px; left:10px; font-size:16px; color:var(--text3); cursor:pointer; padding:4px; }
 
-/* COIN CARDS */
-.coin-card{background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;position:relative;transition:transform .15s}
-.coin-card:active{transform:scale(.98)}
-.coin-card.profit{border-color:rgba(0,214,143,.25)}
-.coin-card.loss{border-color:rgba(255,61,90,.2)}
-.coin-side-bar{position:absolute;right:0;top:0;bottom:0;width:3px}
-.coin-card.profit .coin-side-bar{background:var(--profit)}
-.coin-card.loss .coin-side-bar{background:var(--loss)}
-.coin-main{padding:14px 14px 10px}
-.coin-row1{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
-.coin-identity{display:flex;align-items:center;gap:10px}
-.coin-ava{width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,var(--card2),var(--border));
-  border:1px solid var(--border);display:flex;align-items:center;justify-content:center;
-  font-size:12px;font-weight:700;color:var(--accent);font-family:'JetBrains Mono',monospace;flex-shrink:0}
-.coin-sym{font-size:17px;font-weight:900}
-.coin-pair{font-size:11px;color:var(--text3)}
-.coin-change-badge{font-size:11px;font-weight:700;padding:2px 7px;border-radius:6px;margin-top:2px;display:inline-block}
-.coin-change-badge.profit{background:rgba(0,214,143,.12);color:var(--profit)}
-.coin-change-badge.loss{background:rgba(255,61,90,.1);color:var(--loss)}
-.coin-price-block{text-align:left}
-.coin-price{font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:700}
-.coin-price.profit{color:var(--profit)}
-.coin-price.loss{color:var(--loss)}
-.coin-price-egp{font-size:11px;color:var(--text3);text-align:left;margin-top:1px}
-.coin-stats-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;padding:10px 14px;
-  background:rgba(0,0,0,.2);border-top:1px solid rgba(255,255,255,.04)}
-.cstat-label{font-size:10px;color:var(--text3);margin-bottom:2px}
-.cstat-val{font-size:12px;font-weight:600;font-family:'JetBrains Mono',monospace;color:var(--text2)}
-.coin-pnl-bar{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;
-  background:rgba(0,0,0,.15);border-top:1px solid rgba(255,255,255,.04)}
-.coin-pnl-usd{font-size:15px;font-weight:700;font-family:'JetBrains Mono',monospace}
-.coin-pnl-egp{font-size:11px;color:var(--text3);margin-top:1px}
-.coin-pnl-pct{font-size:16px;font-weight:900;padding:4px 12px;border-radius:8px;font-family:'JetBrains Mono',monospace}
-.coin-pnl-pct.profit{background:rgba(0,214,143,.15);color:var(--profit)}
-.coin-pnl-pct.loss{background:rgba(255,61,90,.12);color:var(--loss)}
+/* ═══════════════════════════════════════
+   PORTFOLIO SUMMARY CARD
+═══════════════════════════════════════ */
+.summary-card {
+  background:linear-gradient(135deg, #0f1e35 0%, #0d1a2e 100%);
+  border:1px solid var(--border);
+  border-radius:var(--r);
+  padding:18px;
+  position:relative; overflow:hidden;
+}
+.summary-card::before {
+  content:''; position:absolute; top:0; left:0; right:0; height:2px;
+  background:linear-gradient(90deg, var(--accent), var(--accent2), var(--accent3));
+}
+.summary-card::after {
+  content:'';
+  position:absolute; top:-60px; right:-60px;
+  width:180px; height:180px;
+  background:radial-gradient(circle, rgba(0,229,184,.07), transparent 70%);
+  pointer-events:none;
+}
+.summary-top {
+  display:flex; justify-content:space-between; align-items:flex-start;
+  margin-bottom:16px;
+}
+.summary-label { font-size:11px; color:var(--text3); font-weight:500; text-transform:uppercase; letter-spacing:.8px; }
+.total-value {
+  font-family:'JetBrains Mono', monospace;
+  font-size:32px; font-weight:700;
+  line-height:1.1;
+  margin-top:4px;
+}
+.total-egp { font-size:14px; color:var(--text2); margin-top:3px; font-family:'JetBrains Mono',monospace; }
+.pnl-badge {
+  display:flex; flex-direction:column; align-items:flex-end; gap:3px;
+}
+.pnl-pct-big {
+  font-size:22px; font-weight:900; font-family:'JetBrains Mono',monospace;
+  padding:4px 12px; border-radius:10px;
+}
+.pnl-pct-big.profit { background:rgba(0,214,143,.15); color:var(--profit); }
+.pnl-pct-big.loss   { background:rgba(255,61,90,.12);  color:var(--loss); }
+.pnl-abs { font-size:11px; color:var(--text2); font-family:'JetBrains Mono',monospace; }
 
-/* AI HEADER */
-.ai-header-card{background:linear-gradient(135deg,#110d2a 0%,#0d1525 100%);
-  border:1px solid rgba(124,58,237,.25);border-radius:var(--r);padding:14px 16px;position:relative;overflow:hidden}
-.ai-header-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;
-  background:linear-gradient(90deg,var(--accent3),var(--accent2),var(--accent))}
-.ai-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
-.ai-label{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700;color:var(--accent)}
-.ai-dot{width:8px;height:8px;border-radius:50%;background:var(--accent3);animation:pulse 2s infinite}
-.ai-analyze-btn{background:linear-gradient(135deg,var(--accent3),var(--accent2));color:#fff;border:none;
-  border-radius:8px;padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer;font-family:'Tajawal',sans-serif;transition:all .2s}
-.ai-analyze-btn:active{transform:scale(.95);opacity:.8}
-.ai-analyze-btn:disabled{opacity:.5;cursor:not-allowed}
-.ai-meta{font-size:11px;color:var(--text3)}
-.ai-disclaimer{margin-top:10px;padding:8px 10px;background:rgba(251,191,36,.06);
-  border:1px solid rgba(251,191,36,.15);border-radius:8px;font-size:11px;color:var(--gold);line-height:1.6}
-.ai-coin-select{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
-.ai-coin-chip{padding:6px 14px;border-radius:20px;background:var(--card2);border:1px solid var(--border);
-  font-size:12px;font-weight:700;cursor:pointer;transition:all .2s;font-family:'JetBrains Mono',monospace;color:var(--text2)}
-.ai-coin-chip.active{background:rgba(0,229,184,.12);border-color:var(--accent);color:var(--accent)}
-.ai-coin-chip:active{transform:scale(.95)}
+.summary-grid {
+  display:grid; grid-template-columns:1fr 1fr 1fr;
+  gap:10px; margin-top:4px;
+}
+.sum-stat { background:rgba(255,255,255,.03); border-radius:10px; padding:10px; }
+.sum-stat-label { font-size:10px; color:var(--text3); margin-bottom:4px; }
+.sum-stat-val { font-size:14px; font-weight:700; font-family:'JetBrains Mono',monospace; color:var(--text); }
+.sum-stat-sub { font-size:10px; color:var(--text3); margin-top:2px; }
 
-/* SKELETON */
-.signal-skeleton{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:20px;
-  display:flex;flex-direction:column;gap:12px}
-.skel-line{height:14px;border-radius:7px;
-  background:linear-gradient(90deg,var(--card2) 25%,var(--border) 50%,var(--card2) 75%);
-  background-size:200% 100%;animation:shimmer 1.4s infinite}
-@keyframes shimmer{to{background-position:-200% 0}}
-.skel-line.short{width:40%}
-.skel-line.medium{width:70%}
+/* EGP rate strip */
+.rate-strip {
+  display:flex; align-items:center; justify-content:space-between;
+  background:var(--card); border:1px solid var(--border);
+  border-radius:10px; padding:8px 14px;
+}
+.rate-strip-label { font-size:11px; color:var(--text3); }
+.rate-strip-val { font-size:13px; font-weight:700; color:var(--gold); font-family:'JetBrains Mono',monospace; }
+.rate-strip-time { font-size:10px; color:var(--text3); }
 
-/* SIGNAL CARD */
-.signal-card{background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;position:relative}
-.signal-card.buy{border-color:rgba(0,214,143,.3)}
-.signal-card.sell{border-color:rgba(255,61,90,.25)}
-.signal-card.wait{border-color:rgba(251,191,36,.2)}
-.signal-top{display:flex;align-items:center;justify-content:space-between;padding:14px}
-.sig-coin{display:flex;align-items:center;gap:10px}
-.sig-ava{width:38px;height:38px;border-radius:50%;background:var(--card2);border:1px solid var(--border);
-  display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;
-  color:var(--accent);font-family:'JetBrains Mono',monospace}
-.sig-sym{font-size:15px;font-weight:900}
-.sig-time{font-size:10px;color:var(--text3);margin-top:2px}
-.sig-badge-wrap{display:flex;flex-direction:column;align-items:flex-end;gap:3px}
-.sig-main{font-size:15px;font-weight:900;padding:6px 16px;border-radius:10px;display:flex;align-items:center;gap:5px}
-.sig-main.buy{background:rgba(0,214,143,.15);color:var(--profit)}
-.sig-main.sell{background:rgba(255,61,90,.12);color:var(--loss)}
-.sig-main.wait{background:rgba(251,191,36,.1);color:var(--gold)}
-.sig-str{font-size:10px;color:var(--text3)}
-.sig-conf-row{display:flex;align-items:center;gap:10px;padding:0 14px 10px}
-.conf-label{font-size:10px;color:var(--text3);white-space:nowrap}
-.conf-track{flex:1;height:6px;background:var(--card2);border-radius:3px;overflow:hidden}
-.conf-fill{height:100%;border-radius:3px;transition:width .8s ease}
-.conf-fill.buy{background:linear-gradient(90deg,var(--profit),#00ffaa)}
-.conf-fill.sell{background:linear-gradient(90deg,var(--loss),#ff6b6b)}
-.conf-fill.wait{background:linear-gradient(90deg,var(--gold),#ffd700)}
-.conf-pct{font-size:12px;font-weight:700;font-family:'JetBrains Mono',monospace;white-space:nowrap}
-.sig-reason{margin:0 14px 12px;background:rgba(255,255,255,.03);border-right:3px solid var(--border);
-  border-radius:0 8px 8px 0;padding:10px 12px;font-size:13px;color:var(--text);line-height:1.8}
-.signal-card.buy .sig-reason{border-right-color:var(--profit)}
-.signal-card.sell .sig-reason{border-right-color:var(--loss)}
-.signal-card.wait .sig-reason{border-right-color:var(--gold)}
-.sig-levels{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:1px;background:var(--border);border-top:1px solid var(--border)}
-.sig-level{background:var(--card2);padding:9px 8px;text-align:center}
-.sig-level-label{font-size:9px;color:var(--text3);margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px}
-.sig-level-val{font-size:11px;font-weight:700;font-family:'JetBrains Mono',monospace}
-.sig-level-val.profit{color:var(--profit)}
-.sig-level-val.loss{color:var(--loss)}
-.sig-level-val.neutral{color:var(--text2)}
-.sig-price-row{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;
-  background:rgba(0,0,0,.15);border-top:1px solid rgba(255,255,255,.04)}
-.sig-price-cur{font-size:11px;color:var(--text3)}
-.sig-price-val{font-size:14px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--text)}
+/* ═══════════════════════════════════════
+   COIN CARDS
+═══════════════════════════════════════ */
+.section-title {
+  font-size:11px; font-weight:700; color:var(--text3);
+  text-transform:uppercase; letter-spacing:1px;
+  display:flex; align-items:center; justify-content:space-between;
+}
+.section-count {
+  background:var(--card2); border:1px solid var(--border);
+  border-radius:20px; padding:2px 8px;
+  font-size:10px; color:var(--text2);
+}
 
-/* SETTINGS */
-.settings-section{background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
-.settings-section-title{padding:12px 16px;font-size:11px;font-weight:700;color:var(--accent);
-  text-transform:uppercase;letter-spacing:1px;background:rgba(0,229,184,.04);border-bottom:1px solid var(--border)}
-.setting-row{display:flex;align-items:center;justify-content:space-between;padding:13px 16px;
-  border-bottom:1px solid rgba(255,255,255,.04)}
-.setting-row:last-child{border-bottom:none}
-.setting-label{font-size:13px;color:var(--text)}
-.setting-sub{font-size:11px;color:var(--text3);margin-top:2px}
-.setting-input{background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:8px 12px;
-  color:var(--text);font-family:'JetBrains Mono',monospace;font-size:14px;outline:none;width:130px;text-align:left;direction:ltr}
-.setting-input:focus{border-color:var(--accent)}
-.coin-row-item{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.04)}
-.coin-row-item:last-child{border-bottom:none}
-.coin-row-ava{width:36px;height:36px;border-radius:50%;background:var(--card2);border:1px solid var(--border);
-  display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;
-  color:var(--accent);font-family:'JetBrains Mono',monospace;flex-shrink:0}
-.coin-row-info{flex:1}
-.coin-row-sym{font-size:14px;font-weight:700}
-.coin-row-meta{font-size:11px;color:var(--text3);margin-top:2px;font-family:'JetBrains Mono',monospace}
-.edit-btn{width:32px;height:32px;border-radius:8px;background:rgba(0,136,255,.1);border:1px solid rgba(0,136,255,.2);
-  display:flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer;transition:all .2s}
-.edit-btn:active{transform:scale(.88)}
-.del-btn{width:32px;height:32px;border-radius:8px;background:rgba(255,61,90,.1);border:1px solid rgba(255,61,90,.2);
-  display:flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer;transition:all .2s}
-.del-btn:active{transform:scale(.88)}
-.add-form{background:rgba(0,229,184,.04);border:1px dashed rgba(0,229,184,.2);border-radius:var(--r);padding:14px}
-.add-form-title{font-size:12px;font-weight:700;color:var(--accent);margin-bottom:12px}
-.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
-.form-field label{font-size:10px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:5px}
-.form-field input{width:100%;background:var(--card2);border:1px solid var(--border);border-radius:8px;
-  padding:10px 12px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:14px;outline:none;text-align:left;direction:ltr}
-.form-field input:focus{border-color:var(--accent)}
-.form-field input::placeholder{color:var(--text3);font-family:'Tajawal',sans-serif;direction:rtl;font-size:12px}
-.add-btn{width:100%;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#000;border:none;
-  border-radius:10px;padding:13px;font-size:15px;font-weight:900;cursor:pointer;font-family:'Tajawal',sans-serif;transition:all .2s}
-.add-btn:active{transform:scale(.97);opacity:.85}
-.save-btn{width:100%;background:var(--card2);border:1px solid var(--border);border-radius:10px;
-  padding:13px;font-size:14px;font-weight:700;color:var(--accent);cursor:pointer;font-family:'Tajawal',sans-serif}
-.save-btn:active{transform:scale(.97)}
+.coin-card {
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:var(--r);
+  overflow:hidden;
+  position:relative;
+  transition:transform .15s;
+}
+.coin-card:active { transform:scale(.98); }
+.coin-card.profit { border-color:rgba(0,214,143,.25); }
+.coin-card.loss   { border-color:rgba(255,61,90,.2); }
+.coin-side-bar {
+  position:absolute; right:0; top:0; bottom:0; width:3px;
+}
+.coin-card.profit .coin-side-bar { background:var(--profit); }
+.coin-card.loss   .coin-side-bar { background:var(--loss); }
 
-/* EDIT MODAL */
-.modal-backdrop{position:fixed;inset:0;z-index:200;background:rgba(7,11,20,.85);backdrop-filter:blur(10px);
-  display:flex;align-items:flex-end;justify-content:center;opacity:0;transition:opacity .25s;pointer-events:none}
-.modal-backdrop.open{opacity:1;pointer-events:all}
-.modal-sheet{width:100%;max-width:480px;background:var(--card);border:1px solid var(--border);
-  border-radius:20px 20px 0 0;padding:0 0 calc(16px + var(--safe-bottom));
-  transform:translateY(100%);transition:transform .3s cubic-bezier(.34,1.1,.64,1);max-height:90vh;overflow-y:auto}
-.modal-backdrop.open .modal-sheet{transform:translateY(0)}
-.modal-handle{width:36px;height:4px;border-radius:2px;background:var(--border);margin:12px auto 0}
-.modal-header{display:flex;align-items:center;justify-content:space-between;padding:16px 18px 14px;border-bottom:1px solid var(--border)}
-.modal-title{font-size:16px;font-weight:900}
-.modal-close{width:32px;height:32px;border-radius:8px;background:var(--card2);border:1px solid var(--border);
-  display:flex;align-items:center;justify-content:center;font-size:16px;cursor:pointer;transition:all .2s}
-.modal-close:active{transform:scale(.9)}
-.modal-body{padding:16px 18px;display:flex;flex-direction:column;gap:14px}
-.modal-coin-info{display:flex;align-items:center;gap:12px;padding:12px 14px;
-  background:rgba(0,229,184,.05);border:1px solid rgba(0,229,184,.15);border-radius:12px}
-.modal-coin-ava{width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,var(--card2),var(--border));
-  border:1px solid var(--border);display:flex;align-items:center;justify-content:center;
-  font-size:13px;font-weight:700;color:var(--accent);font-family:'JetBrains Mono',monospace;flex-shrink:0}
-.modal-coin-sym{font-size:18px;font-weight:900}
-.modal-coin-pair{font-size:12px;color:var(--text3);margin-top:2px}
-.modal-field label{font-size:10px;color:var(--text3);font-weight:700;text-transform:uppercase;letter-spacing:.6px;display:block;margin-bottom:6px}
-.modal-field input{width:100%;background:var(--card2);border:1px solid var(--border);border-radius:10px;
-  padding:12px 14px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:15px;outline:none;
-  text-align:left;direction:ltr;transition:border-color .2s}
-.modal-field input:focus{border-color:var(--accent)}
-.modal-field-hint{font-size:10px;color:var(--text3);margin-top:5px}
-.modal-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 18px 10px}
-.modal-save-btn{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#000;border:none;
-  border-radius:12px;padding:14px;font-size:15px;font-weight:900;cursor:pointer;font-family:'Tajawal',sans-serif;transition:all .2s}
-.modal-save-btn:active{transform:scale(.96);opacity:.85}
-.modal-del-btn{background:rgba(255,61,90,.1);border:1px solid rgba(255,61,90,.25);color:var(--loss);border-radius:12px;
-  padding:14px;font-size:14px;font-weight:700;cursor:pointer;font-family:'Tajawal',sans-serif;transition:all .2s}
-.modal-del-btn:active{transform:scale(.96);background:rgba(255,61,90,.2)}
-.modal-divider{height:1px;background:var(--border);margin:0 18px}
+.coin-main { padding:14px 14px 10px; }
+.coin-row1 { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+.coin-identity { display:flex; align-items:center; gap:10px; }
+.coin-ava {
+  width:40px; height:40px; border-radius:50%;
+  background:linear-gradient(135deg, var(--card2), var(--border));
+  border:1px solid var(--border);
+  display:flex; align-items:center; justify-content:center;
+  font-size:12px; font-weight:700; color:var(--accent);
+  font-family:'JetBrains Mono',monospace;
+  flex-shrink:0;
+}
+.coin-sym { font-size:17px; font-weight:900; }
+.coin-pair { font-size:11px; color:var(--text3); }
+.coin-change-badge {
+  font-size:11px; font-weight:700;
+  padding:2px 7px; border-radius:6px; margin-top:2px;
+  display:inline-block;
+}
+.coin-change-badge.profit { background:rgba(0,214,143,.12); color:var(--profit); }
+.coin-change-badge.loss   { background:rgba(255,61,90,.1);  color:var(--loss); }
 
-/* TOAST */
-.toast{position:fixed;bottom:calc(var(--safe-bottom)+70px);left:50%;
-  transform:translateX(-50%) translateY(30px);background:var(--accent);color:#000;
-  padding:11px 22px;border-radius:10px;font-size:14px;font-weight:700;
-  opacity:0;transition:all .3s cubic-bezier(.34,1.56,.64,1);z-index:999;white-space:nowrap;pointer-events:none;max-width:90vw}
-.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
-.toast.err{background:var(--loss);color:#fff}
-.toast.gold{background:var(--gold);color:#000}
+.coin-price-block { text-align:left; }
+.coin-price {
+  font-family:'JetBrains Mono',monospace;
+  font-size:20px; font-weight:700;
+}
+.coin-price.profit { color:var(--profit); }
+.coin-price.loss   { color:var(--loss); }
+.coin-price-egp { font-size:11px; color:var(--text3); text-align:left; margin-top:1px; }
 
-/* BOTTOM NAV */
-.bottom-nav{display:flex;background:rgba(7,11,20,.95);backdrop-filter:blur(20px);
-  border-top:1px solid var(--border);padding:6px 0 calc(6px + var(--safe-bottom));flex-shrink:0}
-.nav-btn{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 4px;
-  font-size:10px;font-weight:700;color:var(--text3);background:none;border:none;cursor:pointer;
-  font-family:'Tajawal',sans-serif;transition:all .2s}
-.nav-btn .nav-icon{font-size:20px;transition:all .2s}
-.nav-btn.active{color:var(--accent)}
-.nav-btn.active .nav-icon{filter:drop-shadow(0 0 6px var(--accent));transform:scale(1.1)}
+.coin-stats-grid {
+  display:grid; grid-template-columns:1fr 1fr 1fr;
+  gap:8px;
+  padding:10px 14px;
+  background:rgba(0,0,0,.2);
+  border-top:1px solid rgba(255,255,255,.04);
+}
+.cstat-label { font-size:10px; color:var(--text3); margin-bottom:2px; }
+.cstat-val { font-size:12px; font-weight:600; font-family:'JetBrains Mono',monospace; color:var(--text2); }
 
-/* UTILS */
-.profit{color:var(--profit)!important}
-.loss{color:var(--loss)!important}
-.neutral{color:var(--text2)!important}
-.empty-state{display:flex;flex-direction:column;align-items:center;padding:50px 20px;text-align:center}
-.empty-icon{font-size:50px;margin-bottom:16px;opacity:.4}
-.empty-text{font-size:14px;color:var(--text3);line-height:1.8}
-.spin{animation:spinr 1s linear infinite;display:inline-block}
-@keyframes spinr{to{transform:rotate(360deg)}}
+.coin-pnl-bar {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:10px 14px;
+  background:rgba(0,0,0,.15);
+  border-top:1px solid rgba(255,255,255,.04);
+}
+.coin-pnl-usd {
+  font-size:15px; font-weight:700;
+  font-family:'JetBrains Mono',monospace;
+}
+.coin-pnl-egp { font-size:11px; color:var(--text3); margin-top:1px; }
+.coin-pnl-pct {
+  font-size:16px; font-weight:900;
+  padding:4px 12px; border-radius:8px;
+  font-family:'JetBrains Mono',monospace;
+}
+.coin-pnl-pct.profit { background:rgba(0,214,143,.15); color:var(--profit); }
+.coin-pnl-pct.loss   { background:rgba(255,61,90,.12);  color:var(--loss); }
+
+/* ═══════════════════════════════════════
+   AI SIGNALS
+═══════════════════════════════════════ */
+.ai-header-card {
+  background:linear-gradient(135deg, #110d2a 0%, #0d1525 100%);
+  border:1px solid rgba(124,58,237,.25);
+  border-radius:var(--r); padding:14px 16px;
+  position:relative; overflow:hidden;
+}
+.ai-header-card::before {
+  content:''; position:absolute; top:0; left:0; right:0; height:2px;
+  background:linear-gradient(90deg, var(--accent3), var(--accent2), var(--accent));
+}
+.ai-top { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+.ai-label { display:flex; align-items:center; gap:7px; font-size:13px; font-weight:700; color:var(--accent); }
+.ai-dot { width:8px; height:8px; border-radius:50%; background:var(--accent3); animation:pulse 2s infinite; }
+.ai-analyze-btn {
+  background:linear-gradient(135deg, var(--accent3), var(--accent2));
+  color:#fff; border:none; border-radius:8px;
+  padding:7px 14px; font-size:12px; font-weight:700;
+  cursor:pointer; font-family:'Tajawal',sans-serif;
+  transition:all .2s;
+}
+.ai-analyze-btn:active { transform:scale(.95); opacity:.8; }
+.ai-analyze-btn:disabled { opacity:.5; cursor:not-allowed; }
+.ai-meta { font-size:11px; color:var(--text3); }
+.ai-meta strong { color:var(--text2); }
+.ai-disclaimer {
+  margin-top:10px; padding:8px 10px;
+  background:rgba(251,191,36,.06); border:1px solid rgba(251,191,36,.15);
+  border-radius:8px; font-size:11px; color:var(--gold); line-height:1.6;
+}
+.ai-coin-select { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+.ai-coin-chip {
+  padding:6px 14px; border-radius:20px;
+  background:var(--card2); border:1px solid var(--border);
+  font-size:12px; font-weight:700; cursor:pointer;
+  transition:all .2s; font-family:'JetBrains Mono',monospace; color:var(--text2);
+}
+.ai-coin-chip.active { background:rgba(0,229,184,.12); border-color:var(--accent); color:var(--accent); }
+.ai-coin-chip:active { transform:scale(.95); }
+
+.signal-skeleton {
+  background:var(--card); border:1px solid var(--border);
+  border-radius:var(--r); padding:20px;
+  display:flex; flex-direction:column; gap:12px;
+}
+.skel-line {
+  height:14px; border-radius:7px;
+  background:linear-gradient(90deg, var(--card2) 25%, var(--border) 50%, var(--card2) 75%);
+  background-size:200% 100%; animation:shimmer 1.4s infinite;
+}
+@keyframes shimmer { to { background-position:-200% 0; } }
+.skel-line.short { width:40%; }
+.skel-line.medium { width:70%; }
+
+.signal-card {
+  background:var(--card); border:1px solid var(--border);
+  border-radius:var(--r); overflow:hidden; position:relative;
+}
+.signal-card.buy  { border-color:rgba(0,214,143,.3); }
+.signal-card.sell { border-color:rgba(255,61,90,.25); }
+.signal-card.wait { border-color:rgba(251,191,36,.2); }
+.signal-top { display:flex; align-items:center; justify-content:space-between; padding:14px; }
+.sig-coin { display:flex; align-items:center; gap:10px; }
+.sig-ava {
+  width:38px; height:38px; border-radius:50%;
+  background:var(--card2); border:1px solid var(--border);
+  display:flex; align-items:center; justify-content:center;
+  font-size:11px; font-weight:700; color:var(--accent);
+  font-family:'JetBrains Mono',monospace;
+}
+.sig-sym { font-size:15px; font-weight:900; }
+.sig-time { font-size:10px; color:var(--text3); margin-top:2px; }
+.sig-badge-wrap { display:flex; flex-direction:column; align-items:flex-end; gap:3px; }
+.sig-main {
+  font-size:15px; font-weight:900; padding:5px 14px; border-radius:10px;
+  display:flex; align-items:center; gap:5px;
+}
+.sig-main.buy  { background:rgba(0,214,143,.15); color:var(--profit); }
+.sig-main.sell { background:rgba(255,61,90,.12);  color:var(--loss); }
+.sig-main.wait { background:rgba(251,191,36,.1);  color:var(--gold); }
+.sig-str { font-size:10px; color:var(--text3); }
+.sig-conf-row { display:flex; align-items:center; gap:10px; padding:0 14px 10px; }
+.conf-label { font-size:10px; color:var(--text3); white-space:nowrap; }
+.conf-track { flex:1; height:6px; background:var(--card2); border-radius:3px; overflow:hidden; }
+.conf-fill { height:100%; border-radius:3px; transition:width .6s ease; }
+.conf-fill.buy  { background:linear-gradient(90deg, var(--profit), #00ffaa); }
+.conf-fill.sell { background:linear-gradient(90deg, var(--loss), #ff6b6b); }
+.conf-fill.wait { background:linear-gradient(90deg, var(--gold), #ffd700); }
+.conf-pct { font-size:12px; font-weight:700; font-family:'JetBrains Mono',monospace; white-space:nowrap; }
+.sig-reason {
+  margin:0 14px 10px;
+  background:rgba(255,255,255,.03);
+  border-right:3px solid var(--border);
+  border-radius:0 6px 6px 0;
+  padding:8px 10px;
+  font-size:12px; color:var(--text2); line-height:1.6;
+}
+.signal-card.buy  .sig-reason { border-right-color:var(--profit); }
+.signal-card.sell .sig-reason { border-right-color:var(--loss); }
+.signal-card.wait .sig-reason { border-right-color:var(--gold); }
+.sig-levels {
+  display:grid; grid-template-columns:1fr 1fr 1fr 1fr;
+  gap:1px; background:var(--border); border-top:1px solid var(--border);
+}
+.sig-level { background:var(--card2); padding:9px 8px; text-align:center; }
+.sig-level-label { font-size:9px; color:var(--text3); margin-bottom:3px; text-transform:uppercase; letter-spacing:.5px; }
+.sig-level-val { font-size:11px; font-weight:700; font-family:'JetBrains Mono',monospace; }
+.sig-level-val.profit { color:var(--profit); }
+.sig-level-val.loss   { color:var(--loss); }
+.sig-level-val.neutral { color:var(--text2); }
+
+/* ═══════════════════════════════════════
+   SETTINGS SCREEN
+═══════════════════════════════════════ */
+.settings-section {
+  background:var(--card); border:1px solid var(--border);
+  border-radius:var(--r); overflow:hidden;
+}
+.settings-section-title {
+  padding:12px 16px; font-size:11px; font-weight:700; color:var(--accent);
+  text-transform:uppercase; letter-spacing:1px;
+  background:rgba(0,229,184,.04); border-bottom:1px solid var(--border);
+}
+.setting-row {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:13px 16px; border-bottom:1px solid rgba(255,255,255,.04);
+}
+.setting-row:last-child { border-bottom:none; }
+.setting-label { font-size:13px; color:var(--text); }
+.setting-sub { font-size:11px; color:var(--text3); margin-top:2px; }
+.setting-input {
+  background:var(--card2); border:1px solid var(--border);
+  border-radius:8px; padding:8px 12px;
+  color:var(--text); font-family:'JetBrains Mono',monospace;
+  font-size:14px; outline:none; width:140px;
+  text-align:left; direction:ltr;
+}
+.setting-input:focus { border-color:var(--accent); }
+
+.coin-row-item {
+  display:flex; align-items:center; gap:10px;
+  padding:12px 16px; border-bottom:1px solid rgba(255,255,255,.04);
+}
+.coin-row-item:last-child { border-bottom:none; }
+.coin-row-ava {
+  width:36px; height:36px; border-radius:50%;
+  background:var(--card2); border:1px solid var(--border);
+  display:flex; align-items:center; justify-content:center;
+  font-size:11px; font-weight:700; color:var(--accent);
+  font-family:'JetBrains Mono',monospace; flex-shrink:0;
+}
+.coin-row-info { flex:1; }
+.coin-row-sym { font-size:14px; font-weight:700; }
+.coin-row-meta { font-size:11px; color:var(--text3); margin-top:2px; font-family:'JetBrains Mono',monospace; }
+.edit-btn {
+  width:32px; height:32px; border-radius:8px;
+  background:rgba(0,136,255,.1); border:1px solid rgba(0,136,255,.2);
+  display:flex; align-items:center; justify-content:center;
+  font-size:14px; cursor:pointer; transition:all .2s;
+}
+.edit-btn:active { transform:scale(.88); }
+.del-btn {
+  width:32px; height:32px; border-radius:8px;
+  background:rgba(255,61,90,.1); border:1px solid rgba(255,61,90,.2);
+  display:flex; align-items:center; justify-content:center;
+  font-size:14px; cursor:pointer; transition:all .2s;
+}
+.del-btn:active { transform:scale(.88); }
+
+/* Add form */
+.add-form {
+  background:rgba(0,229,184,.04);
+  border:1px dashed rgba(0,229,184,.2);
+  border-radius:var(--r); padding:14px;
+}
+.add-form-title { font-size:12px; font-weight:700; color:var(--accent); margin-bottom:12px; }
+.form-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px; }
+.form-field label { font-size:10px; color:var(--text3); font-weight:600; text-transform:uppercase; letter-spacing:.5px; display:block; margin-bottom:5px; }
+.form-field input {
+  width:100%; background:var(--card2);
+  border:1px solid var(--border); border-radius:8px;
+  padding:10px 12px; color:var(--text);
+  font-family:'JetBrains Mono',monospace;
+  font-size:14px; outline:none;
+  text-align:left; direction:ltr;
+}
+.form-field input:focus { border-color:var(--accent); }
+.form-field input::placeholder { color:var(--text3); font-family:'Tajawal',sans-serif; direction:rtl; font-size:12px; }
+.add-btn {
+  width:100%; background:linear-gradient(135deg, var(--accent), var(--accent2));
+  color:#000; border:none; border-radius:10px;
+  padding:13px; font-size:15px; font-weight:900;
+  cursor:pointer; font-family:'Tajawal',sans-serif; transition:all .2s;
+}
+.add-btn:active { transform:scale(.97); opacity:.85; }
+.save-btn {
+  width:100%; background:var(--card2);
+  border:1px solid var(--border); border-radius:10px;
+  padding:13px; font-size:14px; font-weight:700; color:var(--accent);
+  cursor:pointer; font-family:'Tajawal',sans-serif;
+}
+.save-btn:active { transform:scale(.97); }
+
+/* ═══════════════════════════════════════
+   EDIT MODAL
+═══════════════════════════════════════ */
+.modal-backdrop {
+  position:fixed; inset:0; z-index:200;
+  background:rgba(7,11,20,.85); backdrop-filter:blur(10px);
+  display:flex; align-items:flex-end; justify-content:center;
+  opacity:0; transition:opacity .25s; pointer-events:none;
+}
+.modal-backdrop.open { opacity:1; pointer-events:all; }
+.modal-sheet {
+  width:100%; max-width:480px;
+  background:var(--card); border:1px solid var(--border);
+  border-radius:20px 20px 0 0;
+  padding:0 0 calc(16px + var(--safe-bottom));
+  transform:translateY(100%); transition:transform .3s cubic-bezier(.34,1.1,.64,1);
+  max-height:90vh; overflow-y:auto;
+}
+.modal-backdrop.open .modal-sheet { transform:translateY(0); }
+.modal-handle { width:36px; height:4px; border-radius:2px; background:var(--border); margin:12px auto 0; }
+.modal-header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:16px 18px 14px; border-bottom:1px solid var(--border);
+}
+.modal-title { font-size:16px; font-weight:900; }
+.modal-close {
+  width:32px; height:32px; border-radius:8px;
+  background:var(--card2); border:1px solid var(--border);
+  display:flex; align-items:center; justify-content:center;
+  font-size:16px; cursor:pointer; transition:all .2s;
+}
+.modal-close:active { transform:scale(.9); }
+.modal-body { padding:16px 18px; display:flex; flex-direction:column; gap:14px; }
+.modal-coin-info {
+  display:flex; align-items:center; gap:12px; padding:12px 14px;
+  background:rgba(0,229,184,.05); border:1px solid rgba(0,229,184,.15); border-radius:12px;
+}
+.modal-coin-ava {
+  width:44px; height:44px; border-radius:50%;
+  background:linear-gradient(135deg, var(--card2), var(--border));
+  border:1px solid var(--border);
+  display:flex; align-items:center; justify-content:center;
+  font-size:13px; font-weight:700; color:var(--accent);
+  font-family:'JetBrains Mono',monospace; flex-shrink:0;
+}
+.modal-coin-sym { font-size:18px; font-weight:900; }
+.modal-coin-pair { font-size:12px; color:var(--text3); margin-top:2px; }
+.modal-field label { font-size:10px; color:var(--text3); font-weight:700; text-transform:uppercase; letter-spacing:.6px; display:block; margin-bottom:6px; }
+.modal-field input {
+  width:100%; background:var(--card2); border:1px solid var(--border);
+  border-radius:10px; padding:12px 14px; color:var(--text);
+  font-family:'JetBrains Mono',monospace; font-size:15px; outline:none;
+  text-align:left; direction:ltr; transition:border-color .2s;
+}
+.modal-field input:focus { border-color:var(--accent); }
+.modal-field-hint { font-size:10px; color:var(--text3); margin-top:5px; }
+.modal-actions { display:grid; grid-template-columns:1fr 1fr; gap:10px; padding:0 18px 10px; }
+.modal-save-btn {
+  background:linear-gradient(135deg, var(--accent), var(--accent2)); color:#000; border:none;
+  border-radius:12px; padding:14px; font-size:15px; font-weight:900;
+  cursor:pointer; font-family:'Tajawal',sans-serif; transition:all .2s;
+}
+.modal-save-btn:active { transform:scale(.96); opacity:.85; }
+.modal-del-btn {
+  background:rgba(255,61,90,.1); border:1px solid rgba(255,61,90,.25); color:var(--loss);
+  border-radius:12px; padding:14px; font-size:14px; font-weight:700;
+  cursor:pointer; font-family:'Tajawal',sans-serif; transition:all .2s;
+}
+.modal-del-btn:active { transform:scale(.96); background:rgba(255,61,90,.2); }
+.modal-divider { height:1px; background:var(--border); margin:0 18px; }
+
+/* ═══════════════════════════════════════
+   EMPTY / TOAST
+═══════════════════════════════════════ */
+.empty-state {
+  display:flex; flex-direction:column; align-items:center;
+  padding:50px 20px; text-align:center;
+}
+.empty-icon { font-size:50px; margin-bottom:16px; opacity:.4; }
+.empty-text { font-size:14px; color:var(--text3); line-height:1.8; }
+
+.toast {
+  position:fixed; bottom:calc(var(--safe-bottom) + 70px); left:50%;
+  transform:translateX(-50%) translateY(30px);
+  background:var(--accent); color:#000;
+  padding:11px 22px; border-radius:10px;
+  font-size:14px; font-weight:700;
+  opacity:0; transition:all .3s cubic-bezier(.34,1.56,.64,1);
+  z-index:999; white-space:nowrap; pointer-events:none; max-width:90vw;
+}
+.toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+.toast.err  { background:var(--loss); color:#fff; }
+.toast.gold { background:var(--gold); color:#000; }
+
+/* bottom nav */
+.bottom-nav {
+  display:flex;
+  background:rgba(7,11,20,.95);
+  backdrop-filter:blur(20px);
+  border-top:1px solid var(--border);
+  padding:6px 0 calc(6px + var(--safe-bottom));
+  flex-shrink:0;
+}
+.nav-btn {
+  flex:1; display:flex; flex-direction:column; align-items:center; gap:3px;
+  padding:6px 4px; font-size:10px; font-weight:700; color:var(--text3);
+  background:none; border:none; cursor:pointer;
+  font-family:'Tajawal',sans-serif; transition:all .2s;
+}
+.nav-btn .nav-icon { font-size:20px; transition:all .2s; }
+.nav-btn.active { color:var(--accent); }
+.nav-btn.active .nav-icon { filter:drop-shadow(0 0 6px var(--accent)); transform:scale(1.1); }
+
+/* utility */
+.profit { color:var(--profit) !important; }
+.loss   { color:var(--loss) !important; }
+.neutral { color:var(--text2) !important; }
+.mono { font-family:'JetBrains Mono',monospace; }
+.spin { animation:spinr 1s linear infinite; display:inline-block; }
+@keyframes spinr { to { transform:rotate(360deg); } }
 </style>
 </head>
 <body>
@@ -326,24 +628,28 @@ html,body{width:100%;height:100%;background:var(--bg);color:var(--text);font-fam
   <div class="top-bar">
     <div class="brand">
       <div class="brand-icon">₿</div>
-      <div><div class="brand-name"><span>OKX</span> Tracker</div></div>
+      <div>
+        <div class="brand-name"><span>OKX</span> Tracker</div>
+      </div>
     </div>
     <div class="top-actions">
       <div class="live-pill"><div class="pulse"></div>مباشر</div>
-      <div class="icon-btn" id="refreshBtn">🔄</div>
+      <div class="icon-btn" id="refreshBtn" title="تحديث">🔄</div>
     </div>
   </div>
 
-  <div class="scroll-area">
-    <div id="screenPortfolio" class="screen active"></div>
-    <div id="screenSignals"   class="screen"></div>
-    <div id="screenSettings"  class="screen"></div>
-  </div>
+  <div id="mainScreen" class="scroll-area"></div>
 
   <div class="bottom-nav">
-    <button class="nav-btn active" data-screen="portfolio"><span class="nav-icon">📊</span>محفظتي</button>
-    <button class="nav-btn"        data-screen="signals">  <span class="nav-icon">🤖</span>إشارات AI</button>
-    <button class="nav-btn"        data-screen="settings"> <span class="nav-icon">⚙️</span>إعدادات</button>
+    <button class="nav-btn active" data-screen="portfolio">
+      <span class="nav-icon">📊</span>محفظتي
+    </button>
+    <button class="nav-btn" data-screen="signals">
+      <span class="nav-icon">🤖</span>إشارات AI
+    </button>
+    <button class="nav-btn" data-screen="settings">
+      <span class="nav-icon">⚙️</span>إعدادات
+    </button>
   </div>
 </div>
 
@@ -357,7 +663,7 @@ html,body{width:100%;height:100%;background:var(--bg);color:var(--text);font-fam
     </div>
     <div class="modal-body">
       <div class="modal-coin-info">
-        <div class="modal-coin-ava" id="editAva">—</div>
+        <div class="modal-coin-ava"  id="editAva">—</div>
         <div>
           <div class="modal-coin-sym"  id="editSymLabel">—</div>
           <div class="modal-coin-pair" id="editPairLabel">—</div>
@@ -366,7 +672,7 @@ html,body{width:100%;height:100%;background:var(--bg);color:var(--text);font-fam
       <div class="modal-field">
         <label>الكمية</label>
         <input id="editQty" type="number" step="any" placeholder="مثال: 0.5">
-        <div class="modal-field-hint">عدد الوحدات اللي عندك من العملة دي</div>
+        <div class="modal-field-hint">عدد الوحدات اللي عندك</div>
       </div>
       <div class="modal-field">
         <label>متوسط سعر الشراء (USD)</label>
@@ -384,376 +690,110 @@ html,body{width:100%;height:100%;background:var(--bg);color:var(--text);font-fam
 
 <div class="toast" id="toast"></div>
 
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+
 <script>
-// ══════════════════════════════════════════════════════
-//  STATE
-// ══════════════════════════════════════════════════════
-const DEFAULT_COINS = [
-  {id:'BTC-USDT',sym:'BTC',pair:'BTC/USDT',qty:0.05, avgBuy:62000},
-  {id:'ETH-USDT',sym:'ETH',pair:'ETH/USDT',qty:1.2,  avgBuy:3200},
-  {id:'SOL-USDT',sym:'SOL',pair:'SOL/USDT',qty:10,   avgBuy:145},
-];
-
-let state = {
-  coins:        JSON.parse(localStorage.getItem('okx_coins')||'null') || DEFAULT_COINS,
-  egpRate:      parseFloat(localStorage.getItem('okx_egp')   ||'50.5'),
-  alertAt:      parseFloat(localStorage.getItem('okx_alert') ||'10'),
-  prices:       {},
-  changes:      {},
-  lastUpdate:   null,
-  currentScreen:'portfolio',
-  signals:      JSON.parse(localStorage.getItem('okx_signals')||'null')||[],
-  signalsTime:  localStorage.getItem('okx_signals_time')||null,
-  refreshing:   false,
-  alertFired:   {},
-  _selectedCoin:null,
-};
-
-// ══════════════════════════════════════════════════════
-//  UTILS
-// ══════════════════════════════════════════════════════
-const $ = id => document.getElementById(id);
-const fmt  = (n,d=2) => n==null?'—':Number(n).toFixed(d);
-const fmtK = n => Math.abs(n)>=1e6?(n/1e6).toFixed(2)+'M':Math.abs(n)>=1e3?(n/1e3).toFixed(1)+'K':fmt(n,2);
-const pct  = n => (n>0?'+':'')+fmt(n,2)+'%';
-const clx  = n => n>=0?'profit':'loss';
-
-const saveCoins = () => localStorage.setItem('okx_coins',  JSON.stringify(state.coins));
-const saveEgp   = () => localStorage.setItem('okx_egp',    state.egpRate);
-const saveAlert = () => localStorage.setItem('okx_alert',  state.alertAt);
-
-let toastTimer;
-function showToast(msg, type='') {
-  const t=$('toast');
-  t.textContent=msg;
-  t.className='toast show'+(type?' '+type:'');
-  clearTimeout(toastTimer);
-  toastTimer=setTimeout(()=>t.classList.remove('show'),3500);
-}
-
-// ══════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════
 //  PROFIT ALERT — صوت + إشعار + بانر
-// ══════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════
 function playProfitSound() {
   try {
-    const ctx  = new (window.AudioContext||window.webkitAudioContext)();
-    const notes= [523,659,784,1047];
-    notes.forEach((freq,i) => {
-      const osc=ctx.createOscillator(), gain=ctx.createGain();
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [523, 659, 784, 1047].forEach((freq, i) => {
+      const osc = ctx.createOscillator(), gain = ctx.createGain();
       osc.connect(gain); gain.connect(ctx.destination);
-      osc.type='sine'; osc.frequency.value=freq;
-      const t=ctx.currentTime+i*0.13;
-      gain.gain.setValueAtTime(0,t);
-      gain.gain.linearRampToValueAtTime(0.35,t+0.04);
-      gain.gain.exponentialRampToValueAtTime(0.001,t+0.45);
-      osc.start(t); osc.stop(t+0.5);
+      osc.type = 'sine'; osc.frequency.value = freq;
+      const t = ctx.currentTime + i * 0.13;
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.35, t + 0.04);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+      osc.start(t); osc.stop(t + 0.5);
     });
-  } catch(e){ console.warn('Audio',e); }
+  } catch(e) {}
 }
 
 function sendNotification(title, body) {
   if (!('Notification' in window)) return;
-  const go=()=>{ try{ new Notification(title,{body,icon:'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y=".9em" font-size="90">💰</text></svg>'}); }catch(e){} };
-  if (Notification.permission==='granted') go();
-  else if (Notification.permission!=='denied') Notification.requestPermission().then(p=>{ if(p==='granted') go(); });
+  const go = () => { try { new Notification(title, { body }); } catch(e) {} };
+  if (Notification.permission === 'granted') go();
+  else if (Notification.permission !== 'denied')
+    Notification.requestPermission().then(p => { if (p === 'granted') go(); });
 }
 
-function checkProfitAlert(totalPnl) {
-  const thr = state.alertAt;
-  if (!thr || thr<=0) return;
-  const level = Math.floor(totalPnl / thr);
-  if (level<=0) { state.alertFired={}; return; }
-  const key='lv'+level;
-  if (state.alertFired[key]) return;
-  state.alertFired[key]=true;
+function checkProfitAlert(totalPnl, alertAt, egpRate, alertFired) {
+  if (!alertAt || alertAt <= 0) return;
+  const level = Math.floor(totalPnl / alertAt);
+  if (level <= 0) return;
+  const key = 'lv' + level;
+  if (alertFired[key]) return;
+  alertFired[key] = true;
 
-  const earned    = (level*thr).toFixed(0);
-  const earnedEGP = (level*thr*state.egpRate).toFixed(0);
+  const earned    = (level * alertAt).toFixed(0);
+  const earnedEGP = (level * alertAt * egpRate).toFixed(0);
 
   playProfitSound();
-  showToast(`🎉 ربحت $${earned} — ${fmtK(+earnedEGP)} جنيه!`, 'gold');
-  sendNotification('💰 تهانينا! ربح جديد', `محفظتك ربحت $${earned} ≈ ${fmtK(+earnedEGP)} جنيه 🚀`);
-  showProfitBanner(earned, earnedEGP);
-}
+  showToast('🎉 ربحت $' + earned + ' — ' + Number(earnedEGP).toLocaleString() + ' جنيه!', 'gold');
+  sendNotification('💰 تهانينا!', 'محفظتك ربحت $' + earned + ' 🚀');
 
-function showProfitBanner(usd, egp) {
-  const old=document.getElementById('profitBanner');
-  if(old) old.remove();
-  const b=document.createElement('div');
-  b.id='profitBanner'; b.className='profit-alert-banner';
-  b.innerHTML=`
+  // بانر
+  const old = document.getElementById('profitBanner');
+  if (old) old.remove();
+  const b = document.createElement('div');
+  b.id = 'profitBanner'; b.className = 'profit-alert-banner';
+  b.innerHTML = `
     <div class="alert-icon">🎉</div>
     <div style="flex:1">
-      <div class="alert-text-big">مبروك! ربحت $${usd}</div>
-      <div class="alert-text-sub">≈ ${fmtK(+egp)} جنيه مصري — استمر كده! 🚀</div>
+      <div class="alert-text-big">مبروك! ربحت $${earned}</div>
+      <div class="alert-text-sub">≈ ${Number(earnedEGP).toLocaleString()} جنيه — استمر! 🚀</div>
     </div>
     <div class="alert-close" onclick="this.parentElement.remove()">✕</div>`;
-  const sc=$('screenPortfolio');
-  const rs=sc.querySelector('.rate-strip');
-  if(rs) rs.insertAdjacentElement('afterend',b);
+  const sc = document.getElementById('mainScreen');
+  const rs = sc.querySelector('.rate-strip');
+  if (rs) rs.insertAdjacentElement('afterend', b);
   else sc.prepend(b);
-  setTimeout(()=>{ if(b.parentElement) b.remove(); },12000);
+  setTimeout(() => { if (b.parentElement) b.remove(); }, 12000);
 }
 
-// ══════════════════════════════════════════════════════
-//  FETCH PRICES (OKX Public API)
-// ══════════════════════════════════════════════════════
-async function fetchPrices() {
-  if (state.refreshing) return;
-  state.refreshing=true;
-  $('refreshBtn').innerHTML='<span class="spin">🔄</span>';
-  try {
-    const ids=[...new Set(state.coins.map(c=>c.id))];
-    if (!ids.length) { state.refreshing=false; $('refreshBtn').innerHTML='🔄'; return; }
-    const res=await fetch('https://www.okx.com/api/v5/market/tickers?instType=SPOT');
-    const data=await res.json();
-    if (data.code!=='0') throw new Error('OKX API error');
-    state.prices={}; state.changes={};
-    data.data.forEach(t=>{
-      if (ids.includes(t.instId)){
-        state.prices[t.instId] =parseFloat(t.last);
-        state.changes[t.instId]=parseFloat(t.sodUtc8);
-      }
-    });
-    state.lastUpdate=new Date().toLocaleTimeString('ar-EG');
+// ════════════════════════════════════════════════════
+//  AI ANALYSIS
+// ════════════════════════════════════════════════════
+async function runAIAnalysis(coins, prices, changes, egpRate, selectedCoin) {
+  const toAnalyze = selectedCoin ? coins.filter(c => c.id === selectedCoin) : coins;
 
-    // check profit alert
-    let totalPnl=0;
-    state.coins.forEach(c=>{
-      const p=state.prices[c.id]||0;
-      totalPnl+=(p-c.avgBuy)*c.qty;
-    });
-    if (totalPnl>0) checkProfitAlert(totalPnl);
-
-    if (state.currentScreen==='portfolio') renderPortfolio();
-    showToast('✅ تم التحديث');
-  } catch(e){
-    showToast('⚠️ خطأ في الأسعار','err');
-    console.error(e);
-  }
-  state.refreshing=false;
-  $('refreshBtn').innerHTML='🔄';
-}
-
-// ══════════════════════════════════════════════════════
-//  PORTFOLIO SCREEN
-// ══════════════════════════════════════════════════════
-function renderPortfolio() {
-  const el=$('screenPortfolio');
-  if (!state.coins.length){
-    el.innerHTML=`<div class="empty-state"><div class="empty-icon">📭</div>
-      <div class="empty-text">محفظتك فاضية!<br>روح <b>الإعدادات</b> وأضف عملاتك</div></div>`;
-    return;
-  }
-  let totalUSD=0,totalCost=0;
-  state.coins.forEach(c=>{
-    const p=state.prices[c.id]||0;
-    totalUSD +=p*c.qty;
-    totalCost+=c.avgBuy*c.qty;
-  });
-  const totalEGP=totalUSD*state.egpRate;
-  const totalPnl=totalUSD-totalCost;
-  const totalPct=totalCost?(totalPnl/totalCost)*100:0;
-  const cl=clx(totalPct);
-
-  let html=`
-    <div class="summary-card">
-      <div class="summary-top">
-        <div>
-          <div class="summary-label">إجمالي المحفظة</div>
-          <div class="total-value">$${fmtK(totalUSD)}</div>
-          <div class="total-egp">≈ ${fmtK(totalEGP)} جنيه</div>
-        </div>
-        <div class="pnl-badge">
-          <div class="pnl-pct-big ${cl}">${pct(totalPct)}</div>
-          <div class="pnl-abs ${cl}">${totalPnl>=0?'+':''}$${fmtK(totalPnl)}</div>
-        </div>
-      </div>
-      <div class="summary-grid">
-        <div class="sum-stat">
-          <div class="sum-stat-label">رأس المال</div>
-          <div class="sum-stat-val">$${fmtK(totalCost)}</div>
-          <div class="sum-stat-sub">التكلفة</div>
-        </div>
-        <div class="sum-stat">
-          <div class="sum-stat-label">الربح / الخسارة</div>
-          <div class="sum-stat-val ${cl}">${totalPnl>=0?'+':''}$${fmtK(totalPnl)}</div>
-          <div class="sum-stat-sub">${pct(totalPct)}</div>
-        </div>
-        <div class="sum-stat">
-          <div class="sum-stat-label">العملات</div>
-          <div class="sum-stat-val">${state.coins.length}</div>
-          <div class="sum-stat-sub">عملة</div>
-        </div>
-      </div>
-    </div>
-    <div class="rate-strip">
-      <div class="rate-strip-label">سعر الدولار</div>
-      <div class="rate-strip-val">1 USD = ${fmt(state.egpRate,2)} جنيه</div>
-      <div class="rate-strip-time">${state.lastUpdate||'لم يتحدث بعد'}</div>
-    </div>
-    <div class="section-title">عملاتك <span class="section-count">${state.coins.length}</span></div>`;
-
-  state.coins.forEach(c=>{
-    const price =state.prices[c.id];
-    const change=state.changes[c.id];
-    const val   =price?price*c.qty:0;
-    const cost  =c.avgBuy*c.qty;
-    const pnlUSD=price?val-cost:0;
-    const pnlPct=cost?(pnlUSD/cost)*100:0;
-    const cl    =clx(pnlPct);
-    html+=`
-      <div class="coin-card ${cl}" onclick="quickAI('${c.id}')">
-        <div class="coin-side-bar"></div>
-        <div class="coin-main">
-          <div class="coin-row1">
-            <div class="coin-identity">
-              <div class="coin-ava">${c.sym.slice(0,3)}</div>
-              <div>
-                <div class="coin-sym">${c.sym}</div>
-                <div class="coin-pair">${c.pair}</div>
-                <div class="coin-change-badge ${change!=null?clx(change):''}">${change!=null?pct(change):'—'}</div>
-              </div>
-            </div>
-            <div class="coin-price-block">
-              <div class="coin-price ${price?(change>=0?'profit':'loss'):''}">$${price?fmtK(price):'—'}</div>
-              <div class="coin-price-egp">≈ ${price?fmtK(price*state.egpRate):'—'} جنيه</div>
-            </div>
-          </div>
-        </div>
-        <div class="coin-stats-grid">
-          <div><div class="cstat-label">الكمية</div><div class="cstat-val">${c.qty}</div></div>
-          <div><div class="cstat-label">متوسط الشراء</div><div class="cstat-val">$${fmtK(c.avgBuy)}</div></div>
-          <div><div class="cstat-label">القيمة الحالية</div><div class="cstat-val">$${price?fmtK(val):'—'}</div></div>
-        </div>
-        <div class="coin-pnl-bar">
-          <div>
-            <div class="coin-pnl-usd ${cl}">${price?(pnlUSD>=0?'+':'')+'$'+fmtK(pnlUSD):'—'}</div>
-            <div class="coin-pnl-egp">${price?'≈ '+(pnlUSD>=0?'+':'')+fmtK(pnlUSD*state.egpRate)+' جنيه':'جاري التحديث...'}</div>
-          </div>
-          <div class="coin-pnl-pct ${cl}">${price?pct(pnlPct):'—'}</div>
-        </div>
-      </div>`;
-  });
-
-  if (!state.prices[state.coins[0]?.id])
-    html+=`<div style="text-align:center;color:var(--text3);font-size:12px;padding:8px">اضغط 🔄 لتحديث الأسعار</div>`;
-
-  el.innerHTML=html;
-}
-
-// ══════════════════════════════════════════════════════
-//  AI SIGNALS (مجاني — Claude عام)
-// ══════════════════════════════════════════════════════
-function renderSignals() {
-  const el=$('screenSignals');
-  if (!state.coins.length){
-    el.innerHTML=`<div class="empty-state"><div class="empty-icon">📭</div>
-      <div class="empty-text">أضف عملات الأول من الإعدادات!</div></div>`;
-    return;
-  }
-  const chips=state.coins.map(c=>
-    `<div class="ai-coin-chip ${state._selectedCoin===c.id?'active':''}" onclick="selectCoin('${c.id}')">${c.sym}</div>`
-  ).join('');
-  const timeAgo=state.signalsTime?` · ${state.signalsTime}`:'';
-  const sigHtml=state.signals.length?state.signals.map(renderSignalCard).join(''):'';
-
-  el.innerHTML=`
-    <div class="ai-header-card">
-      <div class="ai-top">
-        <div class="ai-label"><div class="ai-dot"></div>🤖 مستشار AI المصري</div>
-        <button class="ai-analyze-btn" id="analyzeBtn" onclick="runAnalysis()">تحليل دلوقتي ⚡</button>
-      </div>
-      <div class="ai-meta">تحليل مجاني شامل بالعامية المصرية${timeAgo}</div>
-      <div class="ai-disclaimer">⚠️ التحليل للاسترشاد فقط — مش نصيحة مالية رسمية. اتحمل مسؤوليتك دايماً.</div>
-      <div class="ai-coin-select" style="margin-top:10px">
-        <div style="font-size:11px;color:var(--text3);width:100%;margin-bottom:4px">اختار العملة:</div>
-        ${chips}
-        <div class="ai-coin-chip ${!state._selectedCoin?'active':''}" onclick="selectCoin(null)">الكل</div>
-      </div>
-    </div>
-    ${sigHtml||'<div id="signalsBody"></div>'}`;
-}
-
-function selectCoin(id){
-  state._selectedCoin=id||null;
-  renderSignals();
-}
-
-function renderSignalCard(s){
-  const icon=s.decision==='buy'?'🟢 اشتري':s.decision==='sell'?'🔴 بيع':'🟡 استنى';
-  const conf=s.confidence||70;
-  const price=state.prices[s.coinId];
-  return `
-    <div class="signal-card ${s.decision}">
-      <div class="signal-top">
-        <div class="sig-coin">
-          <div class="sig-ava">${(s.sym||'?').slice(0,3)}</div>
-          <div><div class="sig-sym">${s.sym}</div><div class="sig-time">${s.time||''}</div></div>
-        </div>
-        <div class="sig-badge-wrap">
-          <div class="sig-main ${s.decision}">${icon}</div>
-          <div class="sig-str">${s.strength||'متوسط'} · ${conf}% ثقة</div>
-        </div>
-      </div>
-      <div class="sig-conf-row">
-        <div class="conf-label">الثقة</div>
-        <div class="conf-track"><div class="conf-fill ${s.decision}" style="width:${conf}%"></div></div>
-        <div class="conf-pct ${s.decision==='buy'?'profit':s.decision==='sell'?'loss':'neutral'}">${conf}%</div>
-      </div>
-      <div class="sig-reason">${s.reason||''}</div>
-      ${price?`<div class="sig-price-row"><div class="sig-price-cur">السعر الحالي</div><div class="sig-price-val">$${fmtK(price)}</div></div>`:''}
-      <div class="sig-levels">
-        <div class="sig-level"><div class="sig-level-label">دخول</div><div class="sig-level-val neutral">${s.entry||'—'}</div></div>
-        <div class="sig-level"><div class="sig-level-label">هدف 1</div><div class="sig-level-val profit">${s.tp1||'—'}</div></div>
-        <div class="sig-level"><div class="sig-level-label">هدف 2</div><div class="sig-level-val profit">${s.tp2||'—'}</div></div>
-        <div class="sig-level"><div class="sig-level-label">وقف خسارة</div><div class="sig-level-val loss">${s.sl||'—'}</div></div>
-      </div>
-    </div>`;
-}
-
-// ══════════════════════════════════════════════════════
-//  AI ANALYSIS — مجاني بدون API Key
-// ══════════════════════════════════════════════════════
-async function runAnalysis(){
-  const btn=$('analyzeBtn');
-  if (!btn||btn.disabled) return;
-  btn.disabled=true; btn.textContent='⏳ بيفكر...';
-
-  const toAnalyze=state._selectedCoin
-    ?state.coins.filter(c=>c.id===state._selectedCoin)
-    :state.coins;
-
-  const portfolioData=toAnalyze.map(c=>{
-    const price =state.prices[c.id]??null;
-    const change=state.changes[c.id]??null;
-    const val   =price!=null?+(price*c.qty).toFixed(2):null;
-    const cost  =+(c.avgBuy*c.qty).toFixed(2);
-    const pnl   =val!=null?+(val-cost).toFixed(2):null;
-    const pnlPct=val!=null&&cost?+((val-cost)/cost*100).toFixed(2):null;
+  const portfolioData = toAnalyze.map(c => {
+    const price  = prices[c.id] || null;
+    const change = changes[c.id] ?? null;
+    const val    = price ? price * c.qty : null;
+    const cost   = c.avgBuy * c.qty;
+    const pnl    = val != null ? val - cost : null;
+    const pnlPct = val != null && cost ? ((val - cost) / cost * 100) : null;
     return {
-      symbol:c.sym, coinId:c.id,
-      currentPrice:price, avgBuyPrice:c.avgBuy, quantity:c.qty,
-      valueUSD:val, costUSD:cost,
-      pnlUSD:pnl, pnlPercent:pnlPct,
-      pnlEGP:pnl!=null?+(pnl*state.egpRate).toFixed(0):null,
-      change24h:change,
+      symbol: c.sym, coinId: c.id,
+      currentPrice: price, avgBuyPrice: c.avgBuy, quantity: c.qty,
+      valueUSD: val != null ? +val.toFixed(2) : null,
+      costUSD: +cost.toFixed(2),
+      pnlUSD: pnl != null ? +pnl.toFixed(2) : null,
+      pnlPercent: pnlPct != null ? +pnlPct.toFixed(2) : null,
+      pnlEGP: pnl != null ? +(pnl * egpRate).toFixed(0) : null,
+      change24h: change,
     };
   });
 
-  const prompt=`أنت "أستاذ كريبتو" — مستشار عملات رقمية مصري خبير وصريح جداً. بتتكلم عامية مصرية زي صاحب بيكلم صاحبه.
+  const prompt = `أنت "أستاذ كريبتو" — مستشار عملات رقمية مصري خبير وصريح جداً. بتتكلم عامية مصرية 100% زي صاحب بيكلم صاحبه.
 
 بيانات محفظة المستخدم على OKX:
-${JSON.stringify(portfolioData,null,2)}
+${JSON.stringify(portfolioData, null, 2)}
 
-سعر الدولار: ${state.egpRate} جنيه مصري
+سعر الدولار: ${egpRate} جنيه مصري
 
 == تعليمات مهمة ==
-• currentPrice موجود → استخدمه.
-• currentPrice = null → حلل بمعرفتك بالعملة وطبيعة السوق. لا تقول "مش عارف" أو "السعر مش متاح" أبداً — لازم دايماً تدي رأيك.
-• لكل عملة اشرح: (١) إيه اللي بيحصل في السوق دلوقتي لهذه العملة (٢) وضع المستخدم منها (٣) توصيتك الصريحة.
+• لو currentPrice موجود → استخدمه في تحليلك.
+• لو currentPrice = null → حلل بمعرفتك بالسوق وطبيعة العملة. لا تقول "مش عارف" أو "السعر مش متاح" أبداً.
+• لكل عملة اشرح: (١) إيه اللي بيحصل في السوق دلوقتي لهذه العملة (٢) وضع المستخدم (٣) توصيتك الصريحة.
+• اذكر الأرقام بالجنيه المصري.
 
-ابعت JSON فقط بالشكل ده:
+ابعت JSON فقط:
 {
   "signals": [
     {
@@ -762,7 +802,7 @@ ${JSON.stringify(portfolioData,null,2)}
       "decision": "buy",
       "strength": "قوي",
       "confidence": 80,
-      "reason": "٣-٤ جمل عامية مصرية تصف السوق ووضع المستخدم والتوصية بالأرقام",
+      "reason": "٣-٤ جمل عامية مصرية تصف السوق ووضع المستخدم والتوصية",
       "entry": "63000",
       "tp1": "68000",
       "tp2": "75000",
@@ -771,224 +811,25 @@ ${JSON.stringify(portfolioData,null,2)}
   ]
 }
 
-قواعد:
-- عامية مصرية 100% مفيش فصحى
-- reason ٣ جمل على الأقل — مفيش "غير متاح" خالص
-- decision: "buy" أو "sell" أو "wait" (إنجليزي)
-- strength: "قوي" أو "متوسط" أو "ضعيف"
-- confidence بين 55 و 92
-- entry وtp1 وtp2 وsl أرقام دولار كـ string دايماً
-- JSON فقط بدون أي نص خارجه`;
+قواعد: عامية مصرية 100% — reason ٣ جمل على الأقل — decision: buy/sell/wait — strength: قوي/متوسط/ضعيف — confidence 55-92 — أرقام دولار كـ string — JSON فقط بدون أي نص خارجه`;
 
-  // skeleton
-  const scEl=$('screenSignals');
-  const hdr =scEl.querySelector('.ai-header-card');
-  if (hdr) hdr.insertAdjacentHTML('afterend',`
-    <div class="signal-skeleton"><div class="skel-line medium"></div><div class="skel-line short"></div><div class="skel-line"></div></div>
-    <div class="signal-skeleton"><div class="skel-line medium"></div><div class="skel-line short"></div><div class="skel-line"></div></div>`);
-
-  try {
-    const resp=await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        model:'claude-sonnet-4-20250514',
-        max_tokens:2000,
-        messages:[{role:'user',content:prompt}]
-      })
-    });
-    const data=await resp.json();
-    const text=(data.content||[]).map(b=>b.text||'').join('');
-    const match=text.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error('الرد مش JSON');
-    const parsed=JSON.parse(match[0]);
-    const now=new Date().toLocaleTimeString('ar-EG',{hour:'2-digit',minute:'2-digit'});
-    parsed.signals.forEach(s=>{ s.time=now; });
-    state.signals=parsed.signals;
-    state.signalsTime=now;
-    localStorage.setItem('okx_signals',JSON.stringify(state.signals));
-    localStorage.setItem('okx_signals_time',now);
-    renderSignals();
-    showToast('✅ التحليل جاهز!');
-  } catch(e){
-    console.error(e);
-    renderSignals();
-    showToast('❌ خطأ: '+e.message,'err');
-  }
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 2000,
+      messages: [{ role: 'user', content: prompt }]
+    })
+  });
+  const data = await resp.json();
+  const text = (data.content || []).map(b => b.text || '').join('');
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error('الرد مش JSON صحيح');
+  return JSON.parse(match[0]);
 }
-
-function quickAI(coinId){
-  state._selectedCoin=coinId;
-  switchScreen('signals');
-  setTimeout(()=>runAnalysis(),300);
-}
-
-// ══════════════════════════════════════════════════════
-//  SETTINGS
-// ══════════════════════════════════════════════════════
-function renderSettings(){
-  const el=$('screenSettings');
-  const coinRows=state.coins.map((c,i)=>`
-    <div class="coin-row-item">
-      <div class="coin-row-ava">${c.sym.slice(0,3)}</div>
-      <div class="coin-row-info">
-        <div class="coin-row-sym">${c.sym}</div>
-        <div class="coin-row-meta">الكمية: ${c.qty} · متوسط: $${fmtK(c.avgBuy)}</div>
-      </div>
-      <div class="edit-btn" onclick="openEditModal(${i})">✏️</div>
-      <div class="del-btn"  onclick="deleteCoin(${i})">🗑️</div>
-    </div>`).join('');
-
-  el.innerHTML=`
-    <div class="settings-section">
-      <div class="settings-section-title">⚙️ الإعدادات العامة</div>
-      <div class="setting-row">
-        <div>
-          <div class="setting-label">سعر الدولار / جنيه</div>
-          <div class="setting-sub">للتحويل في المحفظة</div>
-        </div>
-        <input class="setting-input" id="egpInput" type="number" value="${state.egpRate}" placeholder="50.5">
-      </div>
-      <div class="setting-row">
-        <div>
-          <div class="setting-label">🔔 تنبيه ربح عند ($)</div>
-          <div class="setting-sub">صوت وإشعار كل ما تكسب المبلغ ده</div>
-        </div>
-        <input class="setting-input" id="alertInput" type="number" value="${state.alertAt}" placeholder="10">
-      </div>
-    </div>
-
-    <div class="settings-section">
-      <div class="settings-section-title">💼 عملاتك (${state.coins.length})</div>
-      ${coinRows||'<div style="padding:16px;color:var(--text3);font-size:13px">لا توجد عملات بعد</div>'}
-    </div>
-
-    <div class="add-form">
-      <div class="add-form-title">➕ إضافة عملة جديدة</div>
-      <div class="form-grid">
-        <div class="form-field"><label>رمز العملة</label><input id="newSym" type="text" placeholder="مثال: BTC"></div>
-        <div class="form-field"><label>الكمية</label><input id="newQty" type="number" step="any" placeholder="مثال: 0.5"></div>
-        <div class="form-field"><label>متوسط سعر الشراء $</label><input id="newAvg" type="number" step="any" placeholder="مثال: 45000"></div>
-        <div class="form-field"><label>الزوج</label><input id="newPair" type="text" placeholder="USDT" value="USDT"></div>
-      </div>
-      <button class="add-btn" onclick="addCoin()">➕ إضافة العملة</button>
-    </div>
-
-    <button class="save-btn" onclick="saveSettings()">💾 حفظ الإعدادات</button>
-    <div style="height:10px"></div>`;
-}
-
-function saveSettings(){
-  const egp  =parseFloat($('egpInput')?.value);
-  const alert=parseFloat($('alertInput')?.value);
-  if (egp>0)   { state.egpRate=egp; saveEgp(); }
-  if (alert>=0){ state.alertAt=alert; saveAlert(); state.alertFired={}; }
-  showToast('✅ تم الحفظ!');
-  renderPortfolio();
-}
-
-function addCoin(){
-  const sym =($('newSym')?.value||'').trim().toUpperCase();
-  const qty =parseFloat($('newQty')?.value);
-  const avg =parseFloat($('newAvg')?.value);
-  const pair=($('newPair')?.value||'USDT').trim().toUpperCase();
-  if (!sym||!qty||!avg){ showToast('⚠️ اكمل كل البيانات!','err'); return; }
-  const basePair=pair.includes('/')?pair:`${sym}/${pair}`;
-  const id=`${sym}-${pair.replace('/','').replace(sym,'')||'USDT'}`;
-  state.coins.push({id,sym,pair:basePair,qty,avgBuy:avg});
-  saveCoins(); renderSettings(); renderPortfolio();
-  showToast(`✅ تمت إضافة ${sym}`);
-}
-
-function deleteCoin(i){
-  const sym=state.coins[i].sym;
-  state.coins.splice(i,1);
-  saveCoins(); renderSettings(); renderPortfolio();
-  showToast(`🗑️ تم حذف ${sym}`);
-}
-
-// ══════════════════════════════════════════════════════
-//  EDIT MODAL
-// ══════════════════════════════════════════════════════
-let _editIdx=null;
-
-function openEditModal(idx){
-  _editIdx=idx;
-  const c=state.coins[idx];
-  $('editAva').textContent      =c.sym.slice(0,3);
-  $('editSymLabel').textContent =c.sym;
-  $('editPairLabel').textContent=c.pair;
-  $('editQty').value            =c.qty;
-  $('editAvg').value            =c.avgBuy;
-  $('editModal').classList.add('open');
-  setTimeout(()=>$('editQty').focus(),350);
-}
-
-function closeEditModal(e){
-  if (e&&e.target!==$('editModal')) return;
-  $('editModal').classList.remove('open');
-  _editIdx=null;
-}
-
-function saveEdit(){
-  if (_editIdx===null) return;
-  const qty=parseFloat($('editQty').value);
-  const avg=parseFloat($('editAvg').value);
-  if (!qty||qty<=0){ showToast('⚠️ الكمية لازم أكبر من صفر!','err'); return; }
-  if (!avg||avg<=0){ showToast('⚠️ سعر الشراء لازم صحيح!','err');    return; }
-  state.coins[_editIdx].qty   =qty;
-  state.coins[_editIdx].avgBuy=avg;
-  saveCoins();
-  $('editModal').classList.remove('open');
-  _editIdx=null;
-  renderSettings(); renderPortfolio();
-  showToast('✅ تم حفظ التعديل!');
-}
-
-function deleteFromModal(){
-  if (_editIdx===null) return;
-  const sym=state.coins[_editIdx].sym;
-  state.coins.splice(_editIdx,1);
-  saveCoins();
-  $('editModal').classList.remove('open');
-  _editIdx=null;
-  renderSettings(); renderPortfolio();
-  showToast(`🗑️ تم حذف ${sym}`);
-}
-
-document.addEventListener('keydown',e=>{ if(e.key==='Escape') closeEditModal(); });
-
-// ══════════════════════════════════════════════════════
-//  NAVIGATION
-// ══════════════════════════════════════════════════════
-function switchScreen(name){
-  state.currentScreen=name;
-  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
-  document.querySelectorAll('.nav-btn').forEach(b=>b.classList.remove('active'));
-  $(`screen${name[0].toUpperCase()+name.slice(1)}`).classList.add('active');
-  document.querySelector(`[data-screen="${name}"]`).classList.add('active');
-  if (name==='portfolio') renderPortfolio();
-  if (name==='signals')   renderSignals();
-  if (name==='settings')  renderSettings();
-}
-
-document.querySelectorAll('.nav-btn').forEach(btn=>{
-  btn.addEventListener('click',()=>switchScreen(btn.dataset.screen));
-});
-$('refreshBtn').addEventListener('click',fetchPrices);
-
-// طلب إذن الإشعارات
-if ('Notification' in window && Notification.permission==='default')
-  setTimeout(()=>Notification.requestPermission(),2000);
-
-// ══════════════════════════════════════════════════════
-//  INIT
-// ══════════════════════════════════════════════════════
-renderPortfolio();
-renderSignals();
-renderSettings();
-fetchPrices();
-setInterval(fetchPrices,30000);
 </script>
+
+<script src="app.js"></script>
 </body>
 </html>
