@@ -106,6 +106,12 @@ function load() {
 function setDbStatus(msg) {
   const el = document.getElementById('dbStatus');
   if (el) el.textContent = msg;
+  const dot = document.getElementById('dbDot');
+  if (dot) {
+    if (msg.includes('متصل')) dot.className = 'connected';
+    else if (msg.includes('خطأ')) dot.className = 'error';
+    else dot.className = '';
+  }
 }
 
 /* ════════════════════════════════════════
@@ -517,48 +523,48 @@ function renderPortfolio() {
           <div class="pnl-abs">${sign(tpnlE)}${fmt(Math.abs(tpnlE))} ج.م</div>
         </div>
       </div>
-      <div class="summary-grid">
-        <div class="sum-stat"><div class="sum-stat-label">التكلفة</div><div class="sum-stat-val">$${fmt(tc,0)}</div><div class="sum-stat-sub">${fmt(tc*eg,0)} ج.م</div></div>
-        <div class="sum-stat"><div class="sum-stat-label">الربح/الخسارة</div><div class="sum-stat-val ${cls}">${sign(tpnl)}$${fmt(Math.abs(tpnl))}</div><div class="sum-stat-sub ${cls}">${sign(tpnlE)}${fmt(Math.abs(tpnlE))} ج.م</div></div>
-        <div class="sum-stat"><div class="sum-stat-label">العملات</div><div class="sum-stat-val">${state.coins.length}</div><div class="sum-stat-sub">${state.lastPriceUpdate?'محدّث':'جاري...'}</div></div>
+      <div class="summary-stats">
+        <div class="stat-box"><div class="stat-label">التكلفة</div><div class="stat-val">$${fmt(tc,0)}</div><div class="stat-sub">${fmt(tc*eg,0)} ج.م</div></div>
+        <div class="stat-box"><div class="stat-label">الربح/الخسارة</div><div class="stat-val ${cls}">${sign(tpnl)}$${fmt(Math.abs(tpnl))}</div><div class="sum-stat-sub ${cls}">${sign(tpnlE)}${fmt(Math.abs(tpnlE))} ج.م</div></div>
+        <div class="stat-box"><div class="stat-label">العملات</div><div class="stat-val">${state.coins.length}</div><div class="stat-sub">${state.lastPriceUpdate?'محدّث':'جاري...'}</div></div>
       </div>
     </div>
-    <div class="section-title">عملاتي <span class="section-count">${state.coins.length}</span></div>`;
+    <div class="section-title">عملاتي <span class="section-badge">${state.coins.length}</span></div>`;
 
   rows.forEach(({c,i,price,qty,avg,val,pnl,pnlPct,pnlE,ch24}) => {
     const ip=pnl!==null?pnl>=0:null, cl=ip===null?'':ip?'profit':'loss';
     const sig=state.signals[c.symbol];
     html += `
     <div class="coin-card ${cl}">
-      <div class="coin-bar"></div>
+      <div class="coin-accent"></div>
       <div class="coin-top">
-        <div class="coin-id">
-          <div class="coin-ava">${c.symbol.substring(0,3)}</div>
+        <div class="coin-left">
+          <div class="coin-avatar">${c.symbol.substring(0,3)}</div>
           <div>
-            <div class="coin-sym">${c.symbol.toUpperCase()}</div>
-            <div class="coin-pair-lbl">/ USDT</div>
-            ${ch24!==null?`<span class="ch-badge ${pc(ch24)}">${sign(ch24)}${fmt(Math.abs(ch24),2)}%</span>`:''}
+            <div class="coin-name">${c.symbol.toUpperCase()}</div>
+            <div class="coin-pair">/ USDT</div>
+            ${ch24!==null?`<span class="coin-change ${pc(ch24)}">${sign(ch24)}${fmt(Math.abs(ch24),2)}%</span>`:''}
           </div>
         </div>
-        <div class="coin-price-blk">
+        <div class="coin-right">
           <div class="coin-price ${cl}">$${price!==null?fmtP(price):'---'}</div>
           <div class="coin-price-egp">${price!==null?fmt(price*eg,2)+' ج.م':'---'}</div>
-          ${sig&&!sig.error?`<div class="coin-sig-lbl" style="color:${sig.signal==='UP'?'var(--profit)':sig.signal==='DOWN'?'var(--loss)':'var(--gold)'}">${sig.signal==='UP'?'🟢 صاعد':sig.signal==='DOWN'?'🔴 هابط':'🟡 محايد'}</div>`:''}
+          ${sig&&!sig.error?`<div class="coin-ai-signal" style="color:${sig.signal==='UP'?'var(--profit)':sig.signal==='DOWN'?'var(--loss)':'var(--gold)'}">${sig.signal==='UP'?'🟢 صاعد':sig.signal==='DOWN'?'🔴 هابط':'🟡 محايد'}</div>`:''}
         </div>
       </div>
       <div class="coin-stats">
-        <div><div class="cs-lbl">الكمية</div><div class="cs-val">${fmt(qty,4)}</div></div>
-        <div><div class="cs-lbl">متوسط الشراء</div><div class="cs-val">$${fmtP(avg)}</div></div>
-        <div><div class="cs-lbl">القيمة</div><div class="cs-val">${val!==null?'$'+fmt(val):'---'}</div></div>
+        <div><div class="coin-stat-label">الكمية</div><div class="coin-stat-val">${fmt(qty,4)}</div></div>
+        <div><div class="coin-stat-label">متوسط الشراء</div><div class="coin-stat-val">$${fmtP(avg)}</div></div>
+        <div><div class="coin-stat-label">القيمة</div><div class="coin-stat-val">${val!==null?'$'+fmt(val):'---'}</div></div>
       </div>
-      <div class="coin-pnl">
+      <div class="coin-pnl-row">
         <div>
           <div class="pnl-usd ${cl}">${pnl!==null?sign(pnl)+'$'+fmt(Math.abs(pnl)):'---'}</div>
-          <div class="pnl-egp-label">${pnlE!==null?sign(pnlE)+fmt(Math.abs(pnlE))+' ج.م':'---'}</div>
+          <div class="pnl-egp-sub">${pnlE!==null?sign(pnlE)+fmt(Math.abs(pnlE))+' ج.م':'---'}</div>
         </div>
-        <div class="pnl-right">
-          <div class="pnl-pct-sm ${ip===null?'neutral':cl}">${pnlPct!==null?sign(pnlPct)+fmt(Math.abs(pnlPct),2)+'%':'---'}</div>
-          <div class="edit-btn" data-edit="${i}">✏️</div>
+        <div class="pnl-actions">
+          <div class="pnl-pct-badge ${ip===null?'neutral':cl}">${pnlPct!==null?sign(pnlPct)+fmt(Math.abs(pnlPct),2)+'%':'---'}</div>
+          <div class="edit-coin-btn" data-edit="${i}">✏️</div>
         </div>
       </div>
     </div>`;
@@ -582,8 +588,8 @@ function renderSignals() {
   } else {
     cards = state.coins.map(c => {
       const s = state.signals[c.symbol];
-      if (!s) return `<div class="signal-card"><div class="sig-top"><div class="sig-coin"><div class="sig-ava">${c.symbol.substring(0,3)}</div><div><div class="sig-sym">${c.symbol}/USDT</div><div class="sig-time">في انتظار التحليل</div></div></div><span style="font-size:22px;opacity:.3">⏳</span></div></div>`;
-      if (s.error) return `<div class="signal-card"><div class="sig-top"><div class="sig-coin"><div class="sig-ava" style="color:var(--loss)">${c.symbol.substring(0,3)}</div><div><div class="sig-sym">${c.symbol}/USDT</div><div class="sig-time" style="color:var(--loss)">${s.error}</div></div></div></div></div>`;
+      if (!s) return `<div class="signal-card"><div class="sig-top"><div class="sig-coin"><div class="sig-avatar">${c.symbol.substring(0,3)}</div><div><div class="sig-sym">${c.symbol}/USDT</div><div class="sig-time">في انتظار التحليل</div></div></div><span style="font-size:22px;opacity:.3">⏳</span></div></div>`;
+      if (s.error) return `<div class="signal-card"><div class="sig-top"><div class="sig-coin"><div class="sig-avatar" style="color:var(--loss)">${c.symbol.substring(0,3)}</div><div><div class="sig-sym">${c.symbol}/USDT</div><div class="sig-time" style="color:var(--loss)">${s.error}</div></div></div></div></div>`;
       const up=s.signal==='UP', dn=s.signal==='DOWN';
       const cc=up?'buy':dn?'sell':'wait';
       const emoji=up?'🟢 اشتري':dn?'🔴 بيع':'🟡 استنى';
@@ -593,22 +599,22 @@ function renderSignals() {
         <div class="signal-card ${cc}">
           <div class="sig-top">
             <div class="sig-coin">
-              <div class="sig-ava">${c.symbol.substring(0,3)}</div>
+              <div class="sig-avatar">${c.symbol.substring(0,3)}</div>
               <div><div class="sig-sym">${c.symbol.toUpperCase()}/USDT</div><div class="sig-time">${timeAgo(s.fetchedAt)}</div></div>
             </div>
-            <div><div class="sig-badge ${cc}">${emoji}</div><div class="sig-str">${strAr} · ${s.confidence}% ثقة</div></div>
+            <div><div class="sig-badge ${cc}">${emoji}</div><div class="sig-strength">${strAr} · ${s.confidence}% ثقة</div></div>
           </div>
-          <div class="conf-row">
-            <span class="conf-lbl">الثقة</span>
+          <div class="conf-bar-row">
+            <span class="conf-label">الثقة</span>
             <div class="conf-track"><div class="conf-fill ${cc}" style="width:${s.confidence}%"></div></div>
             <span class="conf-pct" style="color:${cc2}">${s.confidence}%</span>
           </div>
           <div class="sig-reason">${s.reason||''}</div>
           ${s.entry?`<div class="sig-levels">
-            <div class="sig-lv"><div class="sig-lv-lbl">دخول</div><div class="sig-lv-val neutral">$${fmtP(s.entry)}</div></div>
-            <div class="sig-lv"><div class="sig-lv-lbl">هدف</div><div class="sig-lv-val profit">$${fmtP(s.target)}</div></div>
-            <div class="sig-lv"><div class="sig-lv-lbl">وقف</div><div class="sig-lv-val loss">$${fmtP(s.stopLoss)}</div></div>
-            <div class="sig-lv"><div class="sig-lv-lbl">إطار</div><div class="sig-lv-val neutral">5-15د</div></div>
+            <div class="sig-lv"><div class="sig-lv-label">دخول</div><div class="sig-lv-val neutral">$${fmtP(s.entry)}</div></div>
+            <div class="sig-lv"><div class="sig-lv-label">هدف</div><div class="sig-lv-val profit">$${fmtP(s.target)}</div></div>
+            <div class="sig-lv"><div class="sig-lv-label">وقف</div><div class="sig-lv-val loss">$${fmtP(s.stopLoss)}</div></div>
+            <div class="sig-lv"><div class="sig-lv-label">إطار</div><div class="sig-lv-val neutral">5-15د</div></div>
           </div>`:''}
         </div>`;
     }).join('');
@@ -616,16 +622,16 @@ function renderSignals() {
 
   return `
     <div class="ai-header-card">
-      <div class="ai-top">
-        <div class="ai-label"><div class="ai-dot"></div>🤖 مستشار AI المصري</div>
-        <button class="ai-btn" id="analyzeBtn" ${state.analyzing?'disabled':''}>${lbl}</button>
+      <div class="ai-header-top">
+        <div class="ai-brand"><div class="ai-brand-dot"></div>🤖 مستشار AI المصري</div>
+        <button class="analyze-btn" id="analyzeBtn" ${state.analyzing?'disabled':''}>${lbl}</button>
       </div>
       <div class="ai-meta">
         آخر تحليل: <strong>${timeAgo(state.lastSignalUpdate)}</strong>
         ${next>0?` | التالي: <strong style="color:var(--accent)">${nm}:${String(ns).padStart(2,'0')}</strong>`:''}
         <br>تحليل بالعامية المصرية — مجاني بلا تسجيل
       </div>
-      <div class="ai-disc">⚠️ للاسترشاد فقط — مش نصيحة مالية رسمية</div>
+      <div class="ai-disclaimer">⚠️ للاسترشاد فقط — مش نصيحة مالية رسمية</div>
     </div>
     ${cards}`;
 }
@@ -635,21 +641,21 @@ function renderSignals() {
 ════════════════════════════════════════ */
 function renderSettings() {
   return `
-    <div class="settings-section">
-      <div class="settings-section-title">🪙 عملاتي (${state.coins.length})</div>
+    <div class="settings-block">
+      <div class="settings-block-title">🪙 عملاتي (${state.coins.length})</div>
       ${state.coins.length===0 ? `<div style="padding:16px;text-align:center;color:var(--text3);font-size:13px">لا توجد عملات بعد</div>` : ''}
       ${state.coins.map((c,i) => {
         const pr  = state.prices[c.symbol]?.price || null;
         const pnl = pr ? (pr - parseFloat(c.avgBuy)) * parseFloat(c.quantity) : null;
         const cl  = pnl===null?'':pnl>=0?'var(--profit)':'var(--loss)';
-        return `<div class="coin-row-item">
-          <div class="coin-row-ava">${c.symbol.substring(0,3)}</div>
-          <div class="coin-row-info">
-            <div class="coin-row-sym">${c.symbol.toUpperCase()}/USDT</div>
-            <div class="coin-row-meta">الكمية: ${c.quantity} | شراء: $${c.avgBuy}${pnl!==null?` <span style="color:${cl}">${pnl>=0?'▲':'▼'}$${Math.abs(pnl).toFixed(2)}</span>`:''}</div>
+        return `<div class="coin-list-item">
+          <div class="cli-ava">${c.symbol.substring(0,3)}</div>
+          <div class="cli-info">
+            <div class="cli-sym">${c.symbol.toUpperCase()}/USDT</div>
+            <div class="cli-meta">الكمية: ${c.quantity} | شراء: $${c.avgBuy}${pnl!==null?` <span style="color:${cl}">${pnl>=0?'▲':'▼'}$${Math.abs(pnl).toFixed(2)}</span>`:''}</div>
           </div>
-          <div class="edit-btn" data-edit="${i}">✏️</div>
-          <div class="del-btn" data-del="${i}">🗑️</div>
+          <div class="edit-coin-btn" data-edit="${i}">✏️</div>
+          <div class="cli-del" data-del="${i}">🗑️</div>
         </div>`;
       }).join('')}
     </div>
@@ -657,16 +663,16 @@ function renderSettings() {
     <div class="add-form">
       <div class="add-form-title">➕ إضافة عملة جديدة</div>
       <div class="form-grid">
-        <div class="form-field"><label>رمز العملة</label><input id="fSymbol" type="text" placeholder="BTC, ETH, SOL..." autocomplete="off" spellcheck="false"></div>
-        <div class="form-field"><label>الكمية</label><input id="fQty" type="number" placeholder="0.5" step="any" min="0" inputmode="decimal"></div>
+        <div class="form-field"><label>رمز العملة</label><input id="fSymbol" type="text" class="form-input" placeholder="BTC, ETH, SOL..." autocomplete="off" spellcheck="false"></div>
+        <div class="form-field"><label>الكمية</label><input id="fQty" type="number" class="form-input" placeholder="0.5" step="any" min="0" inputmode="decimal"></div>
       </div>
       <div class="form-grid">
-        <div class="form-field"><label>متوسط الشراء ($)</label><input id="fAvg" type="number" placeholder="45000" step="any" min="0" inputmode="decimal"></div>
+        <div class="form-field"><label>متوسط الشراء ($)</label><input id="fAvg" type="number" class="form-input" placeholder="45000" step="any" min="0" inputmode="decimal"></div>
         <div class="form-field" style="display:flex;align-items:flex-end"><button class="add-btn" id="addCoinBtn">➕ إضافة</button></div>
       </div>
     </div>
 
-    <button class="save-btn" id="saveSettingsBtn">💾 حفظ الإعدادات</button>
+    <button class="save-settings-btn" id="saveSettingsBtn">💾 حفظ الإعدادات</button>
 
     <div class="info-box">
       🔥 <strong style="color:#ff6d00">Firebase</strong> Realtime Database — بياناتك محفوظة على السحابة<br>
@@ -828,14 +834,20 @@ function toast(msg, isErr=false, isGold=false) {
    TABS
 ════════════════════════════════════════ */
 function initTabs() {
-  document.querySelectorAll('.tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-      state.currentTab = tab.dataset.tab;
-      renderScreen();
-    });
+  function activateTab(name) {
+    document.querySelectorAll('.tab, .sidebar-btn').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('[data-tab="' + name + '"]').forEach(t => t.classList.add('active'));
+    state.currentTab = name;
+    renderScreen();
+  }
+  document.querySelectorAll('.tab, .sidebar-btn').forEach(btn => {
+    btn.addEventListener('click', () => activateTab(btn.dataset.tab));
   });
+}
+
+function updateDbDot(status) {
+  const dot = document.getElementById('dbDot');
+  if (dot) dot.className = status;
 }
 
 /* ════════════════════════════════════════
