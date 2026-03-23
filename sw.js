@@ -1,6 +1,6 @@
 // Service Worker — OKX Tracker PWA
 const CACHE = 'okx-tracker-v3';
-const ASSETS = ['./', './index.html', './app.js', './manifest.json'];
+const ASSETS = ['https://mohamednasr5.github.io/OKX/', './app.js', './manifest.json'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
