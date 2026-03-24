@@ -544,7 +544,6 @@ function renderPortfolio() {
     const isExpanded = state.expandedIndex === i;
     const expClass = isExpanded ? 'expanded' : '';
     
-    // Expanded Stats
     const high = tickerObj?.high24h !== undefined ? fmtP(tickerObj.high24h) : '---';
     const low  = tickerObj?.low24h !== undefined ? fmtP(tickerObj.low24h) : '---';
     const vol  = tickerObj?.vol24h !== undefined ? fmt(tickerObj.vol24h, 0) : '---';
@@ -597,11 +596,10 @@ function renderPortfolio() {
           </a>
         </div>
       </div>
-
     </div>`;
   });
   
-  html += `</div>`; // end .portfolio-list
+  html += `</div>`;
   return html;
 }
 
@@ -730,21 +728,41 @@ function renderScreen() {
 }
 
 function wirePortfolioEvents() {
-  // للبطاقات نفسها (أكورديون)
+  const list = document.querySelector('.portfolio-list');
+  
+  // تطبيق التوسعة بتغيير الفئات (Classes) مباشرة لضمان نعومة الأنيميشن
   document.querySelectorAll('.coin-card').forEach(card => {
     card.addEventListener('click', e => {
-      // منع التفعيل لو ضغطنا على أحد الأزرار الداخلية
+      // منع التفعيل لو ضغطنا على الأزرار
       if (e.target.closest('button') || e.target.closest('a')) return;
       
       const idx = parseInt(card.dataset.index);
-      if (!isNaN(idx)) {
-        state.expandedIndex = state.expandedIndex === idx ? null : idx;
-        renderScreen();
+      
+      // إذا كان مفتوحاً سلفاً، نغلقه
+      if (state.expandedIndex === idx) {
+        state.expandedIndex = null;
+        card.classList.remove('expanded');
+        card.querySelector('.expand-chevron')?.classList.remove('open');
+        if (list) list.classList.remove('has-expanded');
+      } else {
+        // إغلاق أي كارت مفتوح آخر
+        if (state.expandedIndex !== null) {
+          const prevCard = document.querySelector(`.coin-card[data-index="${state.expandedIndex}"]`);
+          if (prevCard) {
+            prevCard.classList.remove('expanded');
+            prevCard.querySelector('.expand-chevron')?.classList.remove('open');
+          }
+        }
+        // فتح الكارت الجديد
+        state.expandedIndex = idx;
+        card.classList.add('expanded');
+        card.querySelector('.expand-chevron')?.classList.add('open');
+        if (list) list.classList.add('has-expanded');
       }
     });
   });
 
-  // أزرار التعديل داخل البطاقة
+  // أزرار التعديل
   document.querySelectorAll('[data-edit-btn]').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
@@ -752,7 +770,7 @@ function wirePortfolioEvents() {
     });
   });
 
-  // أزرار الحذف داخل البطاقة
+  // أزرار الحذف
   document.querySelectorAll('[data-del-btn]').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
@@ -787,7 +805,6 @@ function wireSettingsEvents() {
   if (symInput) symInput.addEventListener('input', e => { e.target.value = e.target.value.toUpperCase(); });
   document.getElementById('addCoinBtn')?.addEventListener('click', addCoin);
   document.getElementById('saveSettingsBtn')?.addEventListener('click', saveSettingsHandler);
-  // sync db status
   const d2 = document.getElementById('dbStatus2');
   const d1 = document.getElementById('dbStatus');
   if (d2 && d1) d2.textContent = d1.textContent;
@@ -927,23 +944,19 @@ function initModal() {
    AUTO REFRESH
 ════════════════════════════════════════ */
 function startAutoRefresh() {
-  // أسعار المحفظة كل 10 ثوان
   setInterval(async () => {
     await refreshPrices();
     syncQP();
     if (state.currentTab === 'portfolio') renderScreen();
   }, 10000);
 
-  // أسعار الـ market bar كل 15 ثانية
   setInterval(fetchTickerPrices, 15000);
 
-  // تحليل AI تلقائي كل 5 دقائق
   setInterval(() => {
     const age = state.lastSignalUpdate ? Date.now()-state.lastSignalUpdate : Infinity;
     if (age > 5*60*1000 && state.coins.length > 0 && !state.analyzing) runAllSignals();
   }, 60*1000);
 
-  // Countdown في signals كل ثانية
   setInterval(() => {
     if (state.currentTab === 'signals' && !state.analyzing) renderScreen();
   }, 10000);
@@ -997,7 +1010,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   if ('Notification' in window && Notification.permission === 'default')
     setTimeout(() => Notification.requestPermission(), 3000);
 
-  // تحليل تلقائي عند الفتح لو البيانات قديمة
   const age = state.lastSignalUpdate ? Date.now()-state.lastSignalUpdate : Infinity;
   if (age > 5*60*1000 && state.coins.length > 0)
     setTimeout(runAllSignals, 3000);
