@@ -30,7 +30,7 @@ let state = {
   currentTab: 'portfolio',
   analyzing: false,
   alertFired: {},
-  expandedCard: null,
+  expandedIndex: null, // ← لتتبع البطاقة المفتوحة
 };
 
 /* ════════════════════════════════════════
@@ -480,6 +480,7 @@ function deleteFromModal() {
   const sym = state.coins[_editIdx].symbol;
   state.coins.splice(_editIdx, 1);
   delete state.signals[sym];
+  state.expandedIndex = null; // مسح الكارت المفتوح
   save(); closeEditModal(); renderScreen(); toast('🗑️ تم حذف ' + sym);
 }
 
@@ -505,10 +506,12 @@ function renderPortfolio() {
     const pnlPct= cost>0&&pnl!==null ? (pnl/cost*100) : null;
     const ch24  = t ? (t.price-t.open24h)/t.open24h*100 : null;
     if (val!==null) tv += val; tc += cost;
-    return {c, i, price, qty, avg, val, cost, pnl, pnlPct, pnlE:pnl!==null?pnl*eg:null, ch24};
+    return {c, i, price, qty, avg, val, cost, pnl, pnlPct, pnlE:pnl!==null?pnl*eg:null, ch24, tickerObj: t};
   });
 
   const tpnl=tv-tc, tpnlE=tpnl*eg, tpct=tc>0?(tpnl/tc*100):0, cls=pc(tpnl);
+  
+  const hasExpanded = state.expandedIndex !== null;
 
   let html = `
     <div class="summary-card">
@@ -530,40 +533,24 @@ function renderPortfolio() {
         <div class="stat-box"><div class="stat-label">العملات</div><div class="stat-val">${state.coins.length}</div><div class="stat-sub">${state.lastPriceUpdate?'محدّث':'جاري...'}</div></div>
       </div>
     </div>
-    <div class="section-title">عملاتي <span class="section-badge">${state.coins.length}</span></div>`;
+    <div class="section-title">عملاتي <span class="section-badge">${state.coins.length}</span></div>
+    
+    <div class="portfolio-list ${hasExpanded ? 'has-expanded' : ''}">`;
 
-  rows.forEach(({c,i,price,qty,avg,val,pnl,pnlPct,pnlE,ch24}) => {
+  rows.forEach(({c,i,price,qty,avg,val,pnl,pnlPct,pnlE,ch24,tickerObj}) => {
     const ip=pnl!==null?pnl>=0:null, cl=ip===null?'':ip?'profit':'loss';
     const sig=state.signals[c.symbol];
-    const isExpanded = state.expandedCard === i;
-    const t = state.prices[c.symbol];
-    const high24h = t?.high24h ?? null;
-    const low24h  = t?.low24h  ?? null;
-    const vol24h  = t?.vol24h  ?? null;
-    const sigColor = sig&&!sig.error?(sig.signal==='UP'?'var(--profit)':sig.signal==='DOWN'?'var(--loss)':'var(--gold)'):'';
-    const sigLabel = sig&&!sig.error?(sig.signal==='UP'?'🟢 صاعد':sig.signal==='DOWN'?'🔴 هابط':'🟡 محايد'):'';
-    const okxInstId = `${c.symbol.toUpperCase()}-USDT`;
-    const okxDeepLink = `okx://web/spot?instId=${okxInstId}`;
-    const okxFallback = `https://www.okx.com/trade-spot/${c.symbol.toLowerCase()}-usdt`;
-
-    // Collapsed card (shown when another card is expanded)
-    if (state.expandedCard !== null && !isExpanded) {
-      html += `
-      <div class="coin-card-mini ${cl}" data-expand="${i}">
-        <div class="coin-accent"></div>
-        <div class="ccm-inner">
-          <div class="coin-avatar ccm-ava">${c.symbol.substring(0,3)}</div>
-          <div class="ccm-name">${c.symbol.toUpperCase()}</div>
-          <div class="ccm-price ${cl}">$${price!==null?fmtP(price):'---'}</div>
-          ${sig&&!sig.error?`<div class="ccm-sig" style="color:${sigColor}">${sigLabel}</div>`:''}
-          <div class="ccm-pnl ${ip===null?'neutral':cl}">${pnlPct!==null?sign(pnlPct)+fmt(Math.abs(pnlPct),2)+'%':'---'}</div>
-        </div>
-      </div>`;
-      return;
-    }
+    
+    const isExpanded = state.expandedIndex === i;
+    const expClass = isExpanded ? 'expanded' : '';
+    
+    // Expanded Stats
+    const high = tickerObj?.high24h !== undefined ? fmtP(tickerObj.high24h) : '---';
+    const low  = tickerObj?.low24h !== undefined ? fmtP(tickerObj.low24h) : '---';
+    const vol  = tickerObj?.vol24h !== undefined ? fmt(tickerObj.vol24h, 0) : '---';
 
     html += `
-    <div class="coin-card ${cl}${isExpanded?' expanded':''}" data-expand="${i}">
+    <div class="coin-card ${cl} ${expClass}" data-index="${i}">
       <div class="coin-accent"></div>
       <div class="coin-top">
         <div class="coin-left">
@@ -577,9 +564,8 @@ function renderPortfolio() {
         <div class="coin-right">
           <div class="coin-price ${cl}">$${price!==null?fmtP(price):'---'}</div>
           <div class="coin-price-egp">${price!==null?fmt(price*eg,2)+' ج.م':'---'}</div>
-          ${sig&&!sig.error?`<div class="coin-ai-signal" style="color:${sigColor}">${sigLabel}</div>`:''}
+          ${sig&&!sig.error?`<div class="coin-ai-signal" style="color:${sig.signal==='UP'?'var(--profit)':sig.signal==='DOWN'?'var(--loss)':'var(--gold)'}">${sig.signal==='UP'?'🟢 صاعد':sig.signal==='DOWN'?'🔴 هابط':'🟡 محايد'}</div>`:''}
         </div>
-        <div class="coin-expand-arrow ${isExpanded?'open':''}">▼</div>
       </div>
       <div class="coin-stats">
         <div><div class="coin-stat-label">الكمية</div><div class="coin-stat-val">${fmt(qty,4)}</div></div>
@@ -593,53 +579,29 @@ function renderPortfolio() {
         </div>
         <div class="pnl-actions">
           <div class="pnl-pct-badge ${ip===null?'neutral':cl}">${pnlPct!==null?sign(pnlPct)+fmt(Math.abs(pnlPct),2)+'%':'---'}</div>
+          <div class="expand-chevron ${isExpanded ? 'open' : ''}">▼</div>
         </div>
       </div>
-      ${isExpanded ? `
-      <div class="coin-expanded-body">
-        <div class="cex-divider"></div>
-        <div class="cex-details-grid">
-          <div class="cex-detail-box">
-            <div class="cex-detail-label">أعلى 24 ساعة</div>
-            <div class="cex-detail-val profit">$${high24h!==null?fmtP(high24h):'---'}</div>
-          </div>
-          <div class="cex-detail-box">
-            <div class="cex-detail-label">أدنى 24 ساعة</div>
-            <div class="cex-detail-val loss">$${low24h!==null?fmtP(low24h):'---'}</div>
-          </div>
-          <div class="cex-detail-box">
-            <div class="cex-detail-label">حجم التداول</div>
-            <div class="cex-detail-val">${vol24h!==null?fmt(vol24h,0):'---'}</div>
-          </div>
-          <div class="cex-detail-box">
-            <div class="cex-detail-label">التكلفة الكلية</div>
-            <div class="cex-detail-val">$${fmt(avg*qty)}</div>
-          </div>
-          <div class="cex-detail-box">
-            <div class="cex-detail-label">الربح بالجنيه</div>
-            <div class="cex-detail-val ${cl}">${pnlE!==null?sign(pnlE)+fmt(Math.abs(pnlE))+' ج.م':'---'}</div>
-          </div>
-          <div class="cex-detail-box">
-            <div class="cex-detail-label">نسبة الربح</div>
-            <div class="cex-detail-val ${ip===null?'':cl}">${pnlPct!==null?sign(pnlPct)+fmt(Math.abs(pnlPct),2)+'%':'---'}</div>
-          </div>
+      
+      <div class="coin-expanded-area">
+        <div class="exp-stats-grid">
+          <div class="exp-stat"><div class="exp-lbl">أعلى 24س</div><div class="exp-val profit">$${high}</div></div>
+          <div class="exp-stat"><div class="exp-lbl">أدنى 24س</div><div class="exp-val loss">$${low}</div></div>
+          <div class="exp-stat"><div class="exp-lbl">حجم التداول</div><div class="exp-val neutral">${vol}</div></div>
         </div>
-        ${sig&&!sig.error?`
-        <div class="cex-signal-row">
-          <div class="cex-sig-badge" style="background:${sig.signal==='UP'?'rgba(16,185,129,.12)':sig.signal==='DOWN'?'rgba(239,68,68,.1)':'rgba(245,158,11,.09)'};color:${sigColor};border:1px solid ${sigColor}30">
-            ${sigLabel} — ${sig.strength==='STRONG'?'إشارة قوية':sig.strength==='MODERATE'?'إشارة متوسطة':'إشارة ضعيفة'} · ${sig.confidence}%
-          </div>
-        </div>`:''}
-        <div class="cex-actions">
-          <button class="cex-btn cex-btn-edit" data-edit="${i}">✏️ تعديل</button>
-          <button class="cex-btn cex-btn-del"  data-del="${i}">🗑️ حذف</button>
-          <a class="cex-btn cex-btn-trade" href="${okxDeepLink}" onclick="if(!navigator.userAgent.includes('Android')&&!navigator.userAgent.includes('iPhone')){this.href='${okxFallback}'}">
-            📈 تداول على OKX
+        <div class="exp-actions">
+          <button class="exp-btn edit-btn" data-edit-btn="${i}">✏️ تعديل</button>
+          <button class="exp-btn del-btn" data-del-btn="${i}">🗑️ حذف</button>
+          <a class="exp-trade-btn" href="https://www.okx.com/trade-spot/${c.symbol.toLowerCase()}-usdt" target="_blank" rel="noopener">
+            📈 تداول على <span>OKX</span>
           </a>
         </div>
-      </div>` : ''}
+      </div>
+
     </div>`;
   });
+  
+  html += `</div>`; // end .portfolio-list
   return html;
 }
 
@@ -725,7 +687,7 @@ function renderSettings() {
             <div class="cli-sym">${c.symbol.toUpperCase()}/USDT</div>
             <div class="cli-meta">الكمية: ${c.quantity} | شراء: $${c.avgBuy}${pnl!==null?` <span style="color:${cl}">${pnl>=0?'▲':'▼'}$${Math.abs(pnl).toFixed(2)}</span>`:''}</div>
           </div>
-          <div class="edit-coin-btn" data-edit="${i}">✏️</div>
+          <div class="cli-edit" data-edit="${i}">✏️</div>
           <div class="cli-del" data-del="${i}">🗑️</div>
         </div>`;
       }).join('')}
@@ -768,31 +730,37 @@ function renderScreen() {
 }
 
 function wirePortfolioEvents() {
-  // Expand/collapse on card click
-  document.querySelectorAll('.coin-card[data-expand], .coin-card-mini[data-expand]').forEach(card => {
+  // للبطاقات نفسها (أكورديون)
+  document.querySelectorAll('.coin-card').forEach(card => {
     card.addEventListener('click', e => {
-      if (e.target.closest('[data-edit],[data-del],.cex-btn-trade,.cex-btn-edit,.cex-btn-del')) return;
-      const idx = parseInt(card.dataset.expand);
-      state.expandedCard = state.expandedCard === idx ? null : idx;
-      renderScreen();
+      // منع التفعيل لو ضغطنا على أحد الأزرار الداخلية
+      if (e.target.closest('button') || e.target.closest('a')) return;
+      
+      const idx = parseInt(card.dataset.index);
+      if (!isNaN(idx)) {
+        state.expandedIndex = state.expandedIndex === idx ? null : idx;
+        renderScreen();
+      }
     });
   });
-  // Edit buttons inside expanded card
-  document.querySelectorAll('.cex-btn-edit[data-edit]').forEach(btn => {
+
+  // أزرار التعديل داخل البطاقة
+  document.querySelectorAll('[data-edit-btn]').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
-      openEditModal(parseInt(btn.dataset.edit));
+      openEditModal(parseInt(btn.dataset.editBtn));
     });
   });
-  // Delete buttons inside expanded card
-  document.querySelectorAll('.cex-btn-del[data-del]').forEach(btn => {
+
+  // أزرار الحذف داخل البطاقة
+  document.querySelectorAll('[data-del-btn]').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
-      const i = parseInt(btn.dataset.del);
+      const i = parseInt(btn.dataset.delBtn);
       const sym = state.coins[i].symbol;
       state.coins.splice(i, 1);
       delete state.signals[sym];
-      state.expandedCard = null;
+      state.expandedIndex = null;
       save(); renderScreen(); toast('🗑️ تم حذف ' + sym);
     });
   });
@@ -808,6 +776,7 @@ function wireSettingsEvents() {
       const i = parseInt(btn.dataset.del);
       const sym = state.coins[i].symbol;
       state.coins.splice(i, 1); delete state.signals[sym];
+      state.expandedIndex = null;
       save(); renderScreen(); toast('🗑️ تم حذف ' + sym);
     });
   });
@@ -939,11 +908,6 @@ function initTabs() {
   document.querySelectorAll('.tab, .sidebar-btn').forEach(btn => {
     btn.addEventListener('click', () => activateTab(btn.dataset.tab));
   });
-}
-
-function updateDbDot(status) {
-  const dot = document.getElementById('dbDot');
-  if (dot) dot.className = status;
 }
 
 /* ════════════════════════════════════════
