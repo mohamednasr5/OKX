@@ -7,6 +7,7 @@
 ════════════════════════════════════════ */
 const OKX_TICKER  = 'https://www.okx.com/api/v5/market/ticker';
 const OKX_CANDLES = 'https://www.okx.com/api/v5/market/candles';
+const OKX_WS_URL  = 'wss://ws.okx.com:8443/ws/v5/public';
 
 const TICKER_COINS = [
   {sym:'KAT',  instId:'KAT-USDT'},
@@ -30,8 +31,11 @@ let state = {
   currentTab: 'portfolio',
   analyzing: false,
   alertFired: {},
-  expandedIndex: null, // ← لتتبع البطاقة المفتوحة
+  expandedIndex: null,
 };
+
+let ws = null;
+let uiUpdateTimer = null;
 
 /* ════════════════════════════════════════
    FIREBASE
@@ -63,6 +67,7 @@ function initFirebase() {
       localSave();
       renderScreen();
       syncQP();
+      if (ws) ws.close(); // إعادة الاتصال بالـ WebSocket لاشتراك العملات الجديدة
     });
     setDbStatus('🟢 متصل بقاعدة البيانات');
   } catch(e) {
@@ -72,6 +77,7 @@ function initFirebase() {
 
 async function save() {
   localSave();
+  if (ws) ws.close(); // تحديث اشتراكات الـ WebSocket
   if (!dbRef) return;
   try {
     isSaving = true;
@@ -116,7 +122,7 @@ function setDbStatus(msg) {
 }
 
 /* ════════════════════════════════════════
-   FORMATTING
+   FORMATTING & TOTALS
 ════════════════════════════════════════ */
 const fmt  = (n, d=2) => n==null||isNaN(n) ? '---' : Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
 const fmtP = p => {
@@ -137,8 +143,102 @@ const timeAgo = ts => {
   return `منذ ${Math.floor(d / 3600)} س`;
 };
 
+function calcTotals() {
+  let tv = 0, tc = 0;
+  state.coins.forEach(c => {
+    const price = state.prices[c.symbol]?.price ?? null;
+    if (price !== null) {
+      const qty = parseFloat(c.quantity) || 0;
+      tv += price * qty;
+      tc += (parseFloat(c.avgBuy) || 0) * qty;
+    }
+  });
+  return { tv, tc, tpnl: tv - tc };
+}
+
+function updateBrowserTitle(tpnl) {
+  if (isNaN(tpnl) || tpnl === 0) {
+    document.title = "OKX Tracker";
+  } else {
+    const signStr = tpnl >= 0 ? '+' : '-';
+    document.title = `${signStr}$${fmt(Math.abs(tpnl))} | OKX Tracker`;
+  }
+}
+
 /* ════════════════════════════════════════
-   MARKET BAR — ticker coins
+   WEBSOCKETS (REAL-TIME INSTANT PRICES)
+════════════════════════════════════════ */
+function initWebSocket() {
+  if (ws) ws.close();
+  ws = new WebSocket(OKX_WS_URL);
+
+  ws.onopen = () => {
+    const instIds = new Set();
+    TICKER_COINS.forEach(c => instIds.add(c.instId));
+    state.coins.forEach(c => instIds.add(`${c.symbol.toUpperCase()}-USDT`));
+
+    if (instIds.size > 0) {
+      const args = Array.from(instIds).map(id => ({ channel: 'tickers', instId: id }));
+      ws.send(JSON.stringify({ op: 'subscribe', args }));
+    }
+  };
+
+  ws.onmessage = (e) => {
+    if (e.data === 'pong') return;
+    try {
+      const d = JSON.parse(e.data);
+      if (d.data && d.data.length > 0 && d.arg && d.arg.channel === 'tickers') {
+        const t = d.data[0];
+        const sym = d.arg.instId.replace('-USDT', '');
+        const price = parseFloat(t.last);
+        const open = parseFloat(t.sodUtc8 || t.open24h || t.last);
+
+        // Update ticker prices (Market Bar)
+        if (TICKER_COINS.find(c => c.sym === sym)) {
+          const prev = state.tickerPrices[sym]?.price || price;
+          state.tickerPrices[sym] = {
+            price, change: open > 0 ? (price - open) / open * 100 : 0, prev
+          };
+        }
+
+        // Update portfolio prices
+        if (state.coins.find(c => c.symbol === sym)) {
+          state.prices[sym] = {
+            price, open24h: open,
+            high24h: parseFloat(t.high24h),
+            low24h: parseFloat(t.low24h),
+            vol24h: parseFloat(t.vol24h)
+          };
+        }
+
+        state.lastPriceUpdate = Date.now();
+
+        // Throttle UI update to screen refresh rate (60fps) to avoid lag
+        if (!uiUpdateTimer) {
+          uiUpdateTimer = requestAnimationFrame(() => {
+            const { tpnl } = calcTotals();
+            updateBrowserTitle(tpnl);
+            syncQP(); // Update quick panel universally
+            
+            if (state.currentTab === 'portfolio') updateLiveUI(); // Granular DOM update
+            renderMarketBar(); // Re-render market bar
+            
+            checkProfitAlert(tpnl);
+            uiUpdateTimer = null;
+          });
+        }
+      }
+    } catch(err) {}
+  };
+
+  ws.onclose = () => { setTimeout(initWebSocket, 3000); };
+  
+  // Keep alive connection
+  setInterval(() => { if (ws && ws.readyState === WebSocket.OPEN) ws.send('ping'); }, 20000);
+}
+
+/* ════════════════════════════════════════
+   MARKET BAR — ticker coins (REST Fallback)
 ════════════════════════════════════════ */
 async function fetchTickerPrices() {
   await Promise.allSettled(TICKER_COINS.map(async ({sym, instId}) => {
@@ -183,7 +283,7 @@ function renderMarketBar() {
 }
 
 /* ════════════════════════════════════════
-   PRICES
+   PRICES (REST Fallback)
 ════════════════════════════════════════ */
 async function fetchTicker(symbol) {
   try {
@@ -208,12 +308,9 @@ async function refreshPrices() {
   const results = await Promise.all(state.coins.map(c => fetchTicker(c.symbol)));
   results.forEach((r, i) => { if (r) state.prices[state.coins[i].symbol] = r; });
   state.lastPriceUpdate = Date.now();
-  let totalPnl = 0;
-  state.coins.forEach(c => {
-    const price = state.prices[c.symbol]?.price ?? 0;
-    totalPnl += (price - parseFloat(c.avgBuy)) * parseFloat(c.quantity);
-  });
-  if (totalPnl > 0) checkProfitAlert(totalPnl);
+  const { tpnl } = calcTotals();
+  if (tpnl > 0) checkProfitAlert(tpnl);
+  updateBrowserTitle(tpnl);
 }
 
 /* ════════════════════════════════════════
@@ -256,7 +353,7 @@ function checkProfitAlert(totalPnl) {
   toast(`🎉 مبروك! ربحت $${earned} — ${earnedEGP} جنيه!`, false, true);
   sendNotif('💰 مبروك!', `محفظتك ربحت $${earned} ≈ ${earnedEGP} جنيه 🚀`);
   showProfitBanner(earned, earnedEGP);
-  save();
+  localSave();
 }
 
 function showProfitBanner(usd, egp) {
@@ -480,8 +577,90 @@ function deleteFromModal() {
   const sym = state.coins[_editIdx].symbol;
   state.coins.splice(_editIdx, 1);
   delete state.signals[sym];
-  state.expandedIndex = null; // مسح الكارت المفتوح
+  state.expandedIndex = null;
   save(); closeEditModal(); renderScreen(); toast('🗑️ تم حذف ' + sym);
+}
+
+/* ════════════════════════════════════════
+   GRANULAR DOM UPDATE (FOR REAL-TIME)
+════════════════════════════════════════ */
+function updateLiveUI() {
+  if (state.currentTab !== 'portfolio') return;
+  
+  const eg = state.usdToEgp;
+  let tv = 0, tc = 0;
+
+  state.coins.forEach(c => {
+    const t = state.prices[c.symbol];
+    const price = t?.price ?? null;
+    const qty = parseFloat(c.quantity) || 0;
+    const avg = parseFloat(c.avgBuy) || 0;
+    
+    const val = price !== null ? price * qty : null;
+    const cost = avg * qty;
+    const pnl = val !== null ? val - cost : null;
+    const pnlPct = cost > 0 && pnl !== null ? (pnl / cost * 100) : null;
+    const ch24 = t ? (t.price - t.open24h) / t.open24h * 100 : null;
+
+    if (val !== null) { tv += val; tc += cost; }
+
+    const ip = pnl !== null ? pnl >= 0 : null;
+    const cl = ip === null ? '' : ip ? 'profit' : 'loss';
+
+    // Update specific DOM nodes by ID
+    const elCard = document.getElementById(`c-card-${c.symbol}`);
+    if (elCard) {
+      const isExp = elCard.classList.contains('expanded');
+      elCard.className = `coin-card ${cl} ${isExp ? 'expanded' : ''}`;
+    }
+
+    const elPr = document.getElementById(`c-pr-${c.symbol}`);
+    if (elPr) { elPr.textContent = price !== null ? '$' + fmtP(price) : '---'; elPr.className = `coin-price ${cl}`; }
+
+    const elPre = document.getElementById(`c-pre-${c.symbol}`);
+    if (elPre) elPre.textContent = price !== null ? fmt(price * eg, 2) + ' ج.م' : '---';
+
+    const elVal = document.getElementById(`c-val-${c.symbol}`);
+    if (elVal) elVal.textContent = val !== null ? '$' + fmt(val) : '---';
+
+    const elPnl = document.getElementById(`c-pnl-${c.symbol}`);
+    if (elPnl) { elPnl.textContent = pnl !== null ? sign(pnl) + '$' + fmt(Math.abs(pnl)) : '---'; elPnl.className = `pnl-usd ${cl}`; }
+
+    const elPnle = document.getElementById(`c-pnle-${c.symbol}`);
+    if (elPnle) elPnle.textContent = pnl !== null ? sign(pnl * eg) + fmt(Math.abs(pnl * eg)) + ' ج.م' : '---';
+
+    const elPct = document.getElementById(`c-pct-${c.symbol}`);
+    if (elPct) { elPct.textContent = pnlPct !== null ? sign(pnlPct) + fmt(Math.abs(pnlPct), 2) + '%' : '---'; elPct.className = `pnl-pct-badge ${ip === null ? 'neutral' : cl}`; }
+
+    const elChg = document.getElementById(`c-chg-${c.symbol}`);
+    if (elChg && ch24 !== null) { elChg.textContent = sign(ch24) + fmt(Math.abs(ch24), 2) + '%'; elChg.className = `coin-change ${pc(ch24)}`; }
+
+    // Expanded area stats
+    const elHi = document.getElementById(`c-hi-${c.symbol}`);
+    if (elHi && t?.high24h) elHi.textContent = '$' + fmtP(t.high24h);
+    const elLo = document.getElementById(`c-lo-${c.symbol}`);
+    if (elLo && t?.low24h) elLo.textContent = '$' + fmtP(t.low24h);
+    const elVol = document.getElementById(`c-vol-${c.symbol}`);
+    if (elVol && t?.vol24h) elVol.textContent = fmt(t.vol24h, 0);
+  });
+
+  // Update Totals DOM
+  const tpnl = tv - tc, tpnlE = tpnl * eg, tpct = tc > 0 ? (tpnl / tc * 100) : 0, cls = pc(tpnl);
+
+  const elTotVal = document.getElementById('tot-val');
+  if (elTotVal) { elTotVal.textContent = '$' + fmt(tv); elTotVal.className = `total-value ${cls}`; }
+
+  const elTotEgp = document.getElementById('tot-egp');
+  if (elTotEgp) elTotEgp.textContent = fmt(tv * eg) + ' ج.م';
+
+  const elTotPct = document.getElementById('tot-pct');
+  if (elTotPct) { elTotPct.textContent = sign(tpct) + fmt(tpct, 2) + '%'; elTotPct.className = `pnl-pct-big ${cls}`; }
+
+  const elTotAbs = document.getElementById('tot-abs');
+  if (elTotAbs) { elTotAbs.textContent = sign(tpnl) + '$' + fmt(Math.abs(tpnl)); elTotAbs.className = `pnl-abs ${cls}`; }
+
+  const elTotAbsEgp = document.getElementById('tot-abs-egp');
+  if (elTotAbsEgp) elTotAbsEgp.textContent = sign(tpnlE) + fmt(Math.abs(tpnlE)) + ' ج.م';
 }
 
 /* ════════════════════════════════════════
@@ -505,12 +684,11 @@ function renderPortfolio() {
     const pnl   = val!==null ? val-cost : null;
     const pnlPct= cost>0&&pnl!==null ? (pnl/cost*100) : null;
     const ch24  = t ? (t.price-t.open24h)/t.open24h*100 : null;
-    if (val!==null) tv += val; tc += cost;
+    if (val!==null) { tv += val; tc += cost; }
     return {c, i, price, qty, avg, val, cost, pnl, pnlPct, pnlE:pnl!==null?pnl*eg:null, ch24, tickerObj: t};
   });
 
   const tpnl=tv-tc, tpnlE=tpnl*eg, tpct=tc>0?(tpnl/tc*100):0, cls=pc(tpnl);
-  
   const hasExpanded = state.expandedIndex !== null;
 
   let html = `
@@ -518,29 +696,28 @@ function renderPortfolio() {
       <div class="summary-top">
         <div>
           <div class="summary-label">إجمالي المحفظة</div>
-          <div class="total-value ${cls}">$${fmt(tv)}</div>
-          <div class="total-egp">${fmt(tv*eg)} ج.م</div>
+          <div class="total-value ${cls}" id="tot-val">$${fmt(tv)}</div>
+          <div class="total-egp" id="tot-egp">${fmt(tv*eg)} ج.م</div>
         </div>
         <div class="pnl-badge">
-          <div class="pnl-pct-big ${cls}">${sign(tpct)}${fmt(tpct,2)}%</div>
-          <div class="pnl-abs ${cls}">${sign(tpnl)}$${fmt(Math.abs(tpnl))}</div>
-          <div class="pnl-abs">${sign(tpnlE)}${fmt(Math.abs(tpnlE))} ج.م</div>
+          <div class="pnl-pct-big ${cls}" id="tot-pct">${sign(tpct)}${fmt(tpct,2)}%</div>
+          <div class="pnl-abs ${cls}" id="tot-abs">${sign(tpnl)}$${fmt(Math.abs(tpnl))}</div>
+          <div class="pnl-abs" id="tot-abs-egp">${sign(tpnlE)}${fmt(Math.abs(tpnlE))} ج.م</div>
         </div>
       </div>
       <div class="summary-stats">
         <div class="stat-box"><div class="stat-label">التكلفة</div><div class="stat-val">$${fmt(tc,0)}</div><div class="stat-sub">${fmt(tc*eg,0)} ج.م</div></div>
-        <div class="stat-box"><div class="stat-label">الربح/الخسارة</div><div class="stat-val ${cls}">${sign(tpnl)}$${fmt(Math.abs(tpnl))}</div><div class="sum-stat-sub ${cls}">${sign(tpnlE)}${fmt(Math.abs(tpnlE))} ج.م</div></div>
-        <div class="stat-box"><div class="stat-label">العملات</div><div class="stat-val">${state.coins.length}</div><div class="stat-sub">${state.lastPriceUpdate?'محدّث':'جاري...'}</div></div>
+        <div class="stat-box"><div class="stat-label">الربح/الخسارة</div><div class="stat-val ${cls}" id="st-pnl">${sign(tpnl)}$${fmt(Math.abs(tpnl))}</div><div class="sum-stat-sub ${cls}" id="st-pnle">${sign(tpnlE)}${fmt(Math.abs(tpnlE))} ج.م</div></div>
+        <div class="stat-box"><div class="stat-label">العملات</div><div class="stat-val">${state.coins.length}</div><div class="stat-sub">مباشر ⚡</div></div>
       </div>
     </div>
     <div class="section-title">عملاتي <span class="section-badge">${state.coins.length}</span></div>
     
-    <div class="portfolio-list ${hasExpanded ? 'has-expanded' : ''}">`;
+    <div class="portfolio-list ${hasExpanded ? 'has-expanded' : ''}" id="portfolioList">`;
 
   rows.forEach(({c,i,price,qty,avg,val,pnl,pnlPct,pnlE,ch24,tickerObj}) => {
     const ip=pnl!==null?pnl>=0:null, cl=ip===null?'':ip?'profit':'loss';
     const sig=state.signals[c.symbol];
-    
     const isExpanded = state.expandedIndex === i;
     const expClass = isExpanded ? 'expanded' : '';
     
@@ -549,7 +726,7 @@ function renderPortfolio() {
     const vol  = tickerObj?.vol24h !== undefined ? fmt(tickerObj.vol24h, 0) : '---';
 
     html += `
-    <div class="coin-card ${cl} ${expClass}" data-index="${i}">
+    <div class="coin-card ${cl} ${expClass}" data-index="${i}" id="c-card-${c.symbol}">
       <div class="coin-accent"></div>
       <div class="coin-top">
         <div class="coin-left">
@@ -557,36 +734,36 @@ function renderPortfolio() {
           <div>
             <div class="coin-name">${c.symbol.toUpperCase()}</div>
             <div class="coin-pair">/ USDT</div>
-            ${ch24!==null?`<span class="coin-change ${pc(ch24)}">${sign(ch24)}${fmt(Math.abs(ch24),2)}%</span>`:''}
+            ${ch24!==null?`<span class="coin-change ${pc(ch24)}" id="c-chg-${c.symbol}">${sign(ch24)}${fmt(Math.abs(ch24),2)}%</span>`:''}
           </div>
         </div>
         <div class="coin-right">
-          <div class="coin-price ${cl}">$${price!==null?fmtP(price):'---'}</div>
-          <div class="coin-price-egp">${price!==null?fmt(price*eg,2)+' ج.م':'---'}</div>
+          <div class="coin-price ${cl}" id="c-pr-${c.symbol}">$${price!==null?fmtP(price):'---'}</div>
+          <div class="coin-price-egp" id="c-pre-${c.symbol}">${price!==null?fmt(price*eg,2)+' ج.م':'---'}</div>
           ${sig&&!sig.error?`<div class="coin-ai-signal" style="color:${sig.signal==='UP'?'var(--profit)':sig.signal==='DOWN'?'var(--loss)':'var(--gold)'}">${sig.signal==='UP'?'🟢 صاعد':sig.signal==='DOWN'?'🔴 هابط':'🟡 محايد'}</div>`:''}
         </div>
       </div>
       <div class="coin-stats">
         <div><div class="coin-stat-label">الكمية</div><div class="coin-stat-val">${fmt(qty,4)}</div></div>
         <div><div class="coin-stat-label">متوسط الشراء</div><div class="coin-stat-val">$${fmtP(avg)}</div></div>
-        <div><div class="coin-stat-label">القيمة</div><div class="coin-stat-val">${val!==null?'$'+fmt(val):'---'}</div></div>
+        <div><div class="coin-stat-label">القيمة</div><div class="coin-stat-val" id="c-val-${c.symbol}">${val!==null?'$'+fmt(val):'---'}</div></div>
       </div>
       <div class="coin-pnl-row">
         <div>
-          <div class="pnl-usd ${cl}">${pnl!==null?sign(pnl)+'$'+fmt(Math.abs(pnl)):'---'}</div>
-          <div class="pnl-egp-sub">${pnlE!==null?sign(pnlE)+fmt(Math.abs(pnlE))+' ج.م':'---'}</div>
+          <div class="pnl-usd ${cl}" id="c-pnl-${c.symbol}">${pnl!==null?sign(pnl)+'$'+fmt(Math.abs(pnl)):'---'}</div>
+          <div class="pnl-egp-sub" id="c-pnle-${c.symbol}">${pnlE!==null?sign(pnlE)+fmt(Math.abs(pnlE))+' ج.م':'---'}</div>
         </div>
         <div class="pnl-actions">
-          <div class="pnl-pct-badge ${ip===null?'neutral':cl}">${pnlPct!==null?sign(pnlPct)+fmt(Math.abs(pnlPct),2)+'%':'---'}</div>
+          <div class="pnl-pct-badge ${ip===null?'neutral':cl}" id="c-pct-${c.symbol}">${pnlPct!==null?sign(pnlPct)+fmt(Math.abs(pnlPct),2)+'%':'---'}</div>
           <div class="expand-chevron ${isExpanded ? 'open' : ''}">▼</div>
         </div>
       </div>
       
       <div class="coin-expanded-area">
         <div class="exp-stats-grid">
-          <div class="exp-stat"><div class="exp-lbl">أعلى 24س</div><div class="exp-val profit">$${high}</div></div>
-          <div class="exp-stat"><div class="exp-lbl">أدنى 24س</div><div class="exp-val loss">$${low}</div></div>
-          <div class="exp-stat"><div class="exp-lbl">حجم التداول</div><div class="exp-val neutral">${vol}</div></div>
+          <div class="exp-stat"><div class="exp-lbl">أعلى 24س</div><div class="exp-val profit" id="c-hi-${c.symbol}">$${high}</div></div>
+          <div class="exp-stat"><div class="exp-lbl">أدنى 24س</div><div class="exp-val loss" id="c-lo-${c.symbol}">$${low}</div></div>
+          <div class="exp-stat"><div class="exp-lbl">حجم التداول</div><div class="exp-val neutral" id="c-vol-${c.symbol}">${vol}</div></div>
         </div>
         <div class="exp-actions">
           <button class="exp-btn edit-btn" data-edit-btn="${i}">✏️ تعديل</button>
@@ -728,24 +905,19 @@ function renderScreen() {
 }
 
 function wirePortfolioEvents() {
-  const list = document.querySelector('.portfolio-list');
+  const list = document.getElementById('portfolioList');
   
-  // تطبيق التوسعة بتغيير الفئات (Classes) مباشرة لضمان نعومة الأنيميشن
   document.querySelectorAll('.coin-card').forEach(card => {
     card.addEventListener('click', e => {
-      // منع التفعيل لو ضغطنا على الأزرار
       if (e.target.closest('button') || e.target.closest('a')) return;
       
       const idx = parseInt(card.dataset.index);
-      
-      // إذا كان مفتوحاً سلفاً، نغلقه
       if (state.expandedIndex === idx) {
         state.expandedIndex = null;
         card.classList.remove('expanded');
         card.querySelector('.expand-chevron')?.classList.remove('open');
         if (list) list.classList.remove('has-expanded');
       } else {
-        // إغلاق أي كارت مفتوح آخر
         if (state.expandedIndex !== null) {
           const prevCard = document.querySelector(`.coin-card[data-index="${state.expandedIndex}"]`);
           if (prevCard) {
@@ -753,7 +925,6 @@ function wirePortfolioEvents() {
             prevCard.querySelector('.expand-chevron')?.classList.remove('open');
           }
         }
-        // فتح الكارت الجديد
         state.expandedIndex = idx;
         card.classList.add('expanded');
         card.querySelector('.expand-chevron')?.classList.add('open');
@@ -762,7 +933,6 @@ function wirePortfolioEvents() {
     });
   });
 
-  // أزرار التعديل
   document.querySelectorAll('[data-edit-btn]').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
@@ -770,7 +940,6 @@ function wirePortfolioEvents() {
     });
   });
 
-  // أزرار الحذف
   document.querySelectorAll('[data-del-btn]').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
@@ -841,28 +1010,25 @@ function initQuickPanel() {
     if (egEl) egEl.textContent   = state.usdToEgp;
     if (alEl) alEl.textContent   = state.alertAt;
 
-    let curPnl = 0;
-    state.coins.forEach(c => {
-      const pr = state.prices[c.symbol]?.price || 0;
-      curPnl += (pr - parseFloat(c.avgBuy)) * parseFloat(c.quantity);
-    });
+    const { tpnl } = calcTotals();
+    
     const pill   = document.getElementById('qpPnlPill');
     const sep    = document.getElementById('qpPnlSep');
     const pnlVal = document.getElementById('qpPnlVal');
     const pnlLbl = document.getElementById('qpPnlLbl');
-    if (pill && pnlVal && curPnl !== 0) {
+    if (pill && pnlVal && tpnl !== 0) {
       pill.style.display = 'flex';
       if (sep) sep.style.display = '';
-      pnlVal.textContent = (curPnl >= 0 ? '+' : '') + '$' + Math.abs(curPnl).toFixed(2);
-      pnlVal.className   = 'qp-val ' + (curPnl >= 0 ? 'profit' : 'loss');
-      if (pnlLbl) pnlLbl.textContent = curPnl >= 0 ? 'ربح' : 'خسارة';
+      pnlVal.textContent = (tpnl >= 0 ? '+' : '') + '$' + Math.abs(tpnl).toFixed(2);
+      pnlVal.className   = 'qp-val ' + (tpnl >= 0 ? 'profit' : 'loss');
+      if (pnlLbl) pnlLbl.textContent = tpnl >= 0 ? 'ربح' : 'خسارة';
     } else if (pill) {
       pill.style.display = 'none';
       if (sep) sep.style.display = 'none';
     }
     const sub = document.getElementById('qpAlertSub');
-    if (sub && curPnl > 0 && state.alertAt > 0) {
-      const toNext = (state.alertAt - (curPnl % state.alertAt)).toFixed(2);
+    if (sub && tpnl > 0 && state.alertAt > 0) {
+      const toNext = (state.alertAt - (tpnl % state.alertAt)).toFixed(2);
       sub.innerHTML = `التنبيه القادم بعد <span class="hl gold">$${toNext}</span>`;
     }
   };
@@ -941,22 +1107,16 @@ function initModal() {
 }
 
 /* ════════════════════════════════════════
-   AUTO REFRESH
+   AUTO REFRESH (AI & Countdowns)
 ════════════════════════════════════════ */
 function startAutoRefresh() {
-  setInterval(async () => {
-    await refreshPrices();
-    syncQP();
-    if (state.currentTab === 'portfolio') renderScreen();
-  }, 10000);
-
-  setInterval(fetchTickerPrices, 15000);
-
+  // تحليل AI تلقائي كل 5 دقائق
   setInterval(() => {
     const age = state.lastSignalUpdate ? Date.now()-state.lastSignalUpdate : Infinity;
     if (age > 5*60*1000 && state.coins.length > 0 && !state.analyzing) runAllSignals();
   }, 60*1000);
 
+  // Countdown في signals كل 10 ثواني (بدلاً من كل ثانية توفيراً للموارد)
   setInterval(() => {
     if (state.currentTab === 'signals' && !state.analyzing) renderScreen();
   }, 10000);
@@ -969,10 +1129,13 @@ function initRefreshBtn() {
   document.getElementById('refreshBtn')?.addEventListener('click', async () => {
     const btn = document.getElementById('refreshBtn');
     btn.innerHTML = '<span class="spin">🔄</span>';
+    
+    // إعادة تشغيل الـ WebSocket للتأكد من التحديث الفوري
+    initWebSocket();
+    
     await refreshPrices();
     await fetchTickerPrices();
-    syncQP();
-    renderScreen();
+    
     btn.innerHTML = '🔄';
     toast('✅ تم التحديث');
   });
@@ -999,10 +1162,14 @@ window.addEventListener('DOMContentLoaded', async () => {
   renderMarketBar();
   initFirebase();
 
+  // جلب البيانات لمرة واحدة عند الفتح قبل اتصال الـ WebSocket لتفادي الشاشة الفارغة
   await refreshPrices();
   await fetchTickerPrices();
   renderScreen();
   syncQP();
+
+  // تفعيل الاتصال المباشر (الأسعار اللحظية)
+  initWebSocket();
 
   startAutoRefresh();
   registerSW();
@@ -1010,6 +1177,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   if ('Notification' in window && Notification.permission === 'default')
     setTimeout(() => Notification.requestPermission(), 3000);
 
+  // تحليل تلقائي عند الفتح لو البيانات قديمة
   const age = state.lastSignalUpdate ? Date.now()-state.lastSignalUpdate : Infinity;
   if (age > 5*60*1000 && state.coins.length > 0)
     setTimeout(runAllSignals, 3000);
