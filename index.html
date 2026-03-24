@@ -679,6 +679,106 @@ body::before {
 }
 .edit-coin-btn:active { background: rgba(0,136,255,.28); }
 
+/* ─── CARD EXPAND ARROW ─── */
+.coin-expand-arrow {
+  font-size: 10px; color: var(--t3); margin-right: 4px;
+  transition: transform .3s cubic-bezier(.34,1.2,.64,1);
+  flex-shrink: 0;
+}
+.coin-expand-arrow.open { transform: rotate(180deg); color: var(--teal); }
+.coin-card { cursor: pointer; transition: border-color .2s, box-shadow .2s; }
+.coin-card:active { opacity: .92; }
+.coin-card.expanded {
+  border-color: var(--teal) !important;
+  box-shadow: 0 0 0 1px rgba(0,229,184,.18), var(--shadow-card);
+}
+
+/* ─── EXPANDED BODY ─── */
+.coin-expanded-body { animation: fadeIn .2s ease both; }
+@keyframes fadeIn { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:translateY(0); } }
+
+.cex-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--teal) 40%, var(--blue) 60%, transparent);
+  opacity: .35; margin: 0 12px;
+}
+.cex-details-grid {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 1px; background: var(--edge);
+  border-top: 1px solid var(--edge); margin-top: 0;
+}
+.cex-detail-box {
+  background: var(--card2); padding: 10px 10px;
+}
+.cex-detail-label { font-size: 8px; color: var(--t3); margin-bottom: 3px; text-transform: uppercase; letter-spacing: .5px; }
+.cex-detail-val   { font-size: 11px; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: var(--t2); }
+.cex-detail-val.profit { color: var(--profit); }
+.cex-detail-val.loss   { color: var(--loss); }
+
+.cex-signal-row { padding: 10px 12px 4px; }
+.cex-sig-badge {
+  display: inline-block;
+  font-size: 11px; font-weight: 700;
+  padding: 5px 12px; border-radius: var(--r2);
+  font-family: 'Tajawal', sans-serif;
+}
+
+/* ─── ACTION BUTTONS ─── */
+.cex-actions {
+  display: grid; grid-template-columns: 1fr 1fr 1.4fr;
+  gap: 8px; padding: 10px 12px 13px;
+}
+.cex-btn {
+  display: flex; align-items: center; justify-content: center; gap: 5px;
+  border: none; border-radius: var(--r2);
+  padding: 10px 8px; font-size: 12px; font-weight: 700;
+  cursor: pointer; font-family: 'Tajawal', sans-serif;
+  text-decoration: none; white-space: nowrap;
+  touch-action: manipulation; min-height: 42px;
+  transition: opacity .18s, transform .15s;
+}
+.cex-btn:active { opacity: .8; transform: scale(.97); }
+.cex-btn-edit {
+  background: rgba(0,136,255,.12); border: 1px solid rgba(0,136,255,.28);
+  color: #4a9eff;
+}
+.cex-btn-del {
+  background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.22);
+  color: var(--loss);
+}
+.cex-btn-trade {
+  background: linear-gradient(135deg, var(--teal), var(--blue));
+  color: #000; font-weight: 900;
+}
+
+/* ─── MINI COLLAPSED CARD ─── */
+.coin-card-mini {
+  background: var(--card); border: 1px solid var(--edge);
+  border-radius: var(--r3); overflow: hidden; position: relative;
+  cursor: pointer; touch-action: manipulation;
+  transition: border-color .2s;
+}
+.coin-card-mini.profit { border-color: rgba(16,185,129,.15); }
+.coin-card-mini.loss   { border-color: rgba(239,68,68,.12); }
+.coin-card-mini:active { opacity: .85; }
+.ccm-inner {
+  display: flex; align-items: center; gap: 9px;
+  padding: 10px 12px;
+}
+.ccm-ava {
+  width: 32px; height: 32px; font-size: 8px;
+  flex-shrink: 0;
+}
+.ccm-name { font-size: 12px; font-weight: 900; flex: 1; min-width: 0; }
+.ccm-price { font-size: 12px; font-weight: 700; font-family: 'JetBrains Mono', monospace; flex-shrink: 0; }
+.ccm-price.profit { color: var(--profit); }
+.ccm-price.loss   { color: var(--loss); }
+.ccm-sig { font-size: 9px; flex-shrink: 0; }
+.ccm-pnl { font-size: 10px; font-weight: 700; font-family: 'JetBrains Mono', monospace; flex-shrink: 0; padding: 2px 7px; border-radius: 5px; }
+.ccm-pnl.profit { background: rgba(16,185,129,.1); color: var(--profit); }
+.ccm-pnl.loss   { background: rgba(239,68,68,.09); color: var(--loss); }
+.ccm-pnl.neutral{ color: var(--t3); }
+
 /* ═══════════════════════════════════════════════════════════
    EMPTY STATE
 ═══════════════════════════════════════════════════════════ */
