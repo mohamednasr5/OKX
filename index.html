@@ -124,6 +124,10 @@ body::before { content: ''; position: fixed; inset: 0; z-index: 1; background-im
 .content-wrapper { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 0; }
 #mainScreen { flex: 1; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; padding: 12px 12px 16px; display: flex; flex-direction: column; gap: 11px; position: relative; z-index: 10; }
 #mainScreen::-webkit-scrollbar { display: none; }
+
+/* 🔴 الحل الجذري لمشكلة التداخل (منع الكروت من الإنكماش) */
+#mainScreen > * { flex-shrink: 0 !important; }
+
 .footer { display: none; }
 
 /* ════ PROFIT BANNER ════ */
@@ -162,32 +166,23 @@ body::before { content: ''; position: fixed; inset: 0; z-index: 1; background-im
 .section-badge { background: var(--card2); border: 1px solid var(--edge2); border-radius: var(--r4); padding: 2px 8px; font-size: 9px; color: var(--t2); }
 
 /* ════ PORTFOLIO LIST & ACCORDION ════ */
-.portfolio-list {
-  display: flex; flex-direction: column; gap: 11px;
-}
-.portfolio-list.has-expanded .coin-card {
-  transition: opacity 0.35s ease, transform 0.35s ease, margin 0.35s cubic-bezier(.34,1.2,.64,1);
-}
-.portfolio-list.has-expanded .coin-card:not(.expanded) {
-  opacity: 0.45; transform: scale(0.96);
-}
+.portfolio-list { display: flex; flex-direction: column; gap: 11px; flex-shrink: 0; }
+.portfolio-list > * { flex-shrink: 0 !important; }
+
+.portfolio-list.has-expanded .coin-card { transition: opacity 0.35s ease, transform 0.35s ease, margin 0.35s cubic-bezier(.34,1.2,.64,1); }
+.portfolio-list.has-expanded .coin-card:not(.expanded) { opacity: 0.45; transform: scale(0.96); }
 
 .coin-card {
   background: var(--card); border: 1px solid var(--edge); border-radius: var(--r3);
   overflow: hidden; position: relative; cursor: pointer;
   animation: slideUp .4s cubic-bezier(.34,1.2,.64,1) both;
-  -webkit-user-select: none;
-  transition: all 0.25s ease;
+  -webkit-user-select: none; transition: all 0.25s ease;
 }
 .coin-card.profit { border-color: rgba(16,185,129,.22); }
 .coin-card.loss   { border-color: rgba(239,68,68,.18); }
 
 /* حالة البطاقة المفتوحة */
-.coin-card.expanded {
-  box-shadow: 0 0 25px rgba(0,229,184,.08);
-  border-color: var(--teal); margin: 6px 0;
-  background: linear-gradient(180deg, var(--card) 0%, #0a1120 100%);
-}
+.coin-card.expanded { box-shadow: 0 0 25px rgba(0,229,184,.08); border-color: var(--teal); margin: 6px 0; background: linear-gradient(180deg, var(--card) 0%, #0a1120 100%); }
 .coin-card.expanded.profit { border-color: var(--profit); box-shadow: 0 0 25px rgba(16,185,129,.1); }
 .coin-card.expanded.loss   { border-color: var(--loss); box-shadow: 0 0 25px rgba(239,68,68,.1); }
 
@@ -228,43 +223,20 @@ body::before { content: ''; position: fixed; inset: 0; z-index: 1; background-im
 .expand-chevron.open { transform: rotate(180deg); color: var(--teal); }
 
 /* Expanded Area Styling */
-.coin-expanded-area {
-  max-height: 0; opacity: 0; overflow: hidden; padding: 0 12px;
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.coin-card.expanded .coin-expanded-area {
-  max-height: 400px; opacity: 1; padding: 0 12px 14px 12px;
-}
-.exp-stats-grid {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
-  margin-top: 5px; margin-bottom: 12px;
-  padding-top: 12px; border-top: 1px dashed rgba(255,255,255,0.06);
-}
-.exp-stat {
-  background: rgba(0,0,0,0.3); border-radius: var(--r2); padding: 8px 4px; text-align: center; border: 1px solid rgba(255,255,255,0.02);
-}
+.coin-expanded-area { max-height: 0; opacity: 0; overflow: hidden; padding: 0 12px; transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+.coin-card.expanded .coin-expanded-area { max-height: 400px; opacity: 1; padding: 0 12px 14px 12px; }
+.exp-stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 5px; margin-bottom: 12px; padding-top: 12px; border-top: 1px dashed rgba(255,255,255,0.06); }
+.exp-stat { background: rgba(0,0,0,0.3); border-radius: var(--r2); padding: 8px 4px; text-align: center; border: 1px solid rgba(255,255,255,0.02); }
 .exp-lbl { font-size: 8.5px; color: var(--t3); margin-bottom: 4px; font-weight: 600; }
 .exp-val { font-size: 11px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
 
 .exp-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.exp-btn {
-  padding: 11px; border-radius: var(--r2); font-size: 12px; font-weight: 700;
-  cursor: pointer; border: none; font-family: 'Tajawal', sans-serif;
-  display: flex; align-items: center; justify-content: center; gap: 5px;
-  transition: background 0.2s, transform 0.1s;
-}
+.exp-btn { padding: 11px; border-radius: var(--r2); font-size: 12px; font-weight: 700; cursor: pointer; border: none; font-family: 'Tajawal', sans-serif; display: flex; align-items: center; justify-content: center; gap: 5px; transition: background 0.2s, transform 0.1s; }
 .exp-btn:active { transform: scale(0.96); }
 .exp-btn.edit-btn { background: rgba(0,136,255,0.1); color: var(--blue); border: 1px solid rgba(0,136,255,0.25); }
 .exp-btn.del-btn  { background: rgba(239,68,68,0.1); color: var(--loss); border: 1px solid rgba(239,68,68,0.25); }
 
-.exp-trade-btn {
-  grid-column: 1 / -1;
-  background: linear-gradient(135deg, #000, #111); border: 1px solid var(--edge2);
-  color: #fff; text-decoration: none;
-  padding: 13px; border-radius: var(--r2); font-size: 14px; font-weight: 900;
-  display: flex; align-items: center; justify-content: center; gap: 6px;
-  transition: transform 0.1s; box-shadow: var(--shadow-card);
-}
+.exp-trade-btn { grid-column: 1 / -1; background: linear-gradient(135deg, #000, #111); border: 1px solid var(--edge2); color: #fff; text-decoration: none; padding: 13px; border-radius: var(--r2); font-size: 14px; font-weight: 900; display: flex; align-items: center; justify-content: center; gap: 6px; transition: transform 0.1s; box-shadow: var(--shadow-card); }
 .exp-trade-btn:active { transform: scale(0.98); }
 .exp-trade-btn span { color: var(--teal); font-family: 'Orbitron', monospace; letter-spacing: 1px; }
 
