@@ -116,4 +116,66 @@ body::before { content: ''; position: fixed; inset: 0; z-index: 1; background-im
 .toast { box-shadow: 0 10px 40px rgba(0,0,0,0.6); backdrop-filter: blur(10px); }
 
 /* Utilities omitted for brevity - Assume all existing classes remain but enhanced */
+   /* ═══════════════════════════════════════════════════════════
+   📱 إصلاحات تجاوب الموبايل والخطوط (Mobile Responsiveness Fix)
+═══════════════════════════════════════════════════════════ */
+
+/* 1. زيادة سُمك الخطوط وتفتيح الألوان لتكون واضحة */
+:root {
+  --t1: #ffffff; /* أبيض ناصع للنصوص الأساسية */
+  --t2: #cbd5e1; /* تفتيح الرمادي للنصوص الثانوية */
+  --t3: #94a3b8; /* تفتيح العناوين الصغيرة */
+}
+
+body {
+  font-weight: 500; /* التخلص من نعومة الخط */
+}
+
+/* 2. تكبير اللوحة السريعة العلوية (الدولار والتنبيهات) */
+.qp-bar { padding: 0 16px; height: 50px; }
+.qp-chip-label { font-size: 12px; font-weight: 700; color: var(--t2); }
+.qp-chip-val { font-size: 15px; font-weight: 900; }
+.qp-hint { font-size: 11px; margin-top: 4px; }
+
+/* 3. إصلاح الهيدر العلوي */
+.logo-name { font-size: 16px; font-weight: 900; }
+.logo-sub { font-size: 11px; font-weight: 500; color: var(--t2); }
+.live-pill { padding: 5px 12px; font-size: 12px; }
+
+/* 4. تكبير نصوص الإعدادات وقائمة العملات */
+.settings-block-title { font-size: 14px; padding: 14px 16px; }
+.cli-sym { font-size: 16px; font-weight: 900; }
+.cli-meta { font-size: 12px; font-weight: 500; }
+.info-box { font-size: 13px; line-height: 2; font-weight: 500; }
+
+/* 5. ⭐ إصلاح نموذج "إضافة عملة جديدة" (جعله عمودي على الموبايل) */
+.add-form-title { font-size: 15px; margin-bottom: 16px; }
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr; /* عمود واحد ليتمدد بعرض الشاشة */
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.form-field label { font-size: 12px; margin-bottom: 8px; color: var(--t2); }
+.form-input { 
+  font-size: 16px; /* خط كبير يمنع الآيفون من عمل Zoom إجباري */
+  padding: 14px; 
+  font-weight: 700;
+}
+.add-btn { font-size: 16px; padding: 14px; }
+
+/* 6. تكبير التابات السفلية (شريط التنقل) */
+.tab { font-size: 14px; padding: 16px 0; font-weight: 900; }
+.tab-icon { font-size: 18px; margin-left: 6px; }
+
+/* 7. تكبير شريط أسعار السوق السفلي */
+.mi-sym { font-size: 11px; }
+.mi-price { font-size: 14px; font-weight: 700; }
+.mi-chg { font-size: 10px; }
+.mbar-label { font-size: 10px; padding: 6px 12px; }
+
+/* إعادة العمودين فقط في الشاشات الكبيرة (الكمبيوتر والتابلت) */
+@media (min-width: 600px) {
+  .form-grid { grid-template-columns: 1fr 1fr; }
+}
 </style>
