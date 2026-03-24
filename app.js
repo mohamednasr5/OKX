@@ -1,6 +1,67 @@
-// OKX Tracker PWA — app.js
+// OKX Tracker PWA — app.js (Pro Edition with 3D & Haptics)
 // م. محمد حماد
 'use strict';
+
+/* ════════════════════════════════════════
+   HAPTICS & ANIMATIONS ENGINE
+════════════════════════════════════════ */
+// تشغيل الاهتزاز للموبايل عند الضغط
+const haptic = (type = 'light') => {
+  if (!navigator.vibrate) return;
+  if (type === 'light') navigator.vibrate(30);
+  if (type === 'heavy') navigator.vibrate([40, 30, 40]);
+  if (type === 'success') navigator.vibrate([30, 50, 30]);
+};
+
+// محرك الأنيميشن للأرقام (Count Up)
+function animateValue(obj, start, end, duration, formatFn) {
+  let startTimestamp = null;
+  const step = (timestamp) => {
+    if (!startTimestamp) startTimestamp = timestamp;
+    const progress = Math.min((timestamp - startTimestamp) / duration, 1);
+    // حركة سلسة (Ease Out)
+    const easeOut = 1 - Math.pow(1 - progress, 3);
+    const current = (easeOut * (end - start) + start);
+    obj.innerHTML = formatFn(current);
+    if (progress < 1) {
+      window.requestAnimationFrame(step);
+    } else {
+      obj.innerHTML = formatFn(end); // تأكيد الرقم النهائي
+    }
+  };
+  window.requestAnimationFrame(step);
+}
+
+// محرك الـ 3D Hover & Gyro للبطاقات
+function init3DEffects() {
+  const cards = document.querySelectorAll('.card-3d');
+  cards.forEach(card => {
+    card.addEventListener('mousemove', e => {
+      const rect = card.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      
+      const centerX = rect.width / 2;
+      const centerY = rect.height / 2;
+      
+      const rotateX = ((y - centerY) / centerY) * -8;
+      const rotateY = ((x - centerX) / centerX) * 8;
+      
+      card.style.transform = `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale3d(1.02, 1.02, 1.02)`;
+      card.style.setProperty('--mx', `${(x / rect.width) * 100}%`);
+      card.style.setProperty('--my', `${(y / rect.height) * 100}%`);
+    });
+    
+    card.addEventListener('mouseleave', () => {
+      card.style.transform = `perspective(1000px) rotateX(0deg) rotateY(0deg) scale3d(1, 1, 1)`;
+      card.style.setProperty('--mx', `50%`);
+      card.style.setProperty('--my', `-50%`);
+    });
+
+    // دعم اللمس للموبايل
+    card.addEventListener('touchstart', () => haptic('light'), {passive: true});
+  });
+}
 
 /* ════════════════════════════════════════
    CONFIG & STATE
@@ -432,6 +493,7 @@ async function analyzeOne(coin) {
 
 async function runAllSignals() {
   if (state.analyzing || !state.coins.length) return;
+  haptic('heavy');
   state.analyzing = true; renderScreen();
   for (const c of state.coins) {
     const res = await analyzeOne(c);
@@ -450,6 +512,7 @@ async function runAllSignals() {
 let _editIdx = null;
 
 function openEditModal(idx) {
+  haptic('light');
   _editIdx = idx;
   const c = state.coins[idx];
   document.getElementById('editAva').textContent       = c.symbol.substring(0,3);
@@ -479,7 +542,7 @@ function deleteFromModal() {
   const sym = state.coins[_editIdx].symbol;
   state.coins.splice(_editIdx, 1);
   delete state.signals[sym];
-  save(); closeEditModal(); renderScreen(); toast('🗑️ تم حذف ' + sym);
+  save(); closeEditModal(); renderScreen(); toast('🗑️ تم حذف ' + sym, true);
 }
 
 /* ════════════════════════════════════════
@@ -510,11 +573,11 @@ function renderPortfolio() {
   const tpnl=tv-tc, tpnlE=tpnl*eg, tpct=tc>0?(tpnl/tc*100):0, cls=pc(tpnl);
 
   let html = `
-    <div class="summary-card">
+    <div class="summary-card card-3d">
       <div class="summary-top">
         <div>
           <div class="summary-label">إجمالي المحفظة</div>
-          <div class="total-value ${cls}">$${fmt(tv)}</div>
+          <div class="total-value ${cls}" data-val="${tv}">$${fmt(tv)}</div>
           <div class="total-egp">${fmt(tv*eg)} ج.م</div>
         </div>
         <div class="pnl-badge">
@@ -535,7 +598,7 @@ function renderPortfolio() {
     const ip=pnl!==null?pnl>=0:null, cl=ip===null?'':ip?'profit':'loss';
     const sig=state.signals[c.symbol];
     html += `
-    <div class="coin-card ${cl}">
+    <div class="coin-card card-3d ${cl}">
       <div class="coin-accent"></div>
       <div class="coin-top">
         <div class="coin-left">
@@ -584,19 +647,19 @@ function renderSignals() {
   if (!state.coins.length) {
     cards = `<div class="empty-state"><div class="empty-icon">📭</div><div class="empty-text">أضف عملات في الإعدادات أولاً</div></div>`;
   } else if (state.analyzing && !Object.keys(state.signals).length) {
-    cards = state.coins.map(() => `<div class="skel"><div class="skel-line m"></div><div class="skel-line s"></div><div class="skel-line"></div></div>`).join('');
+    cards = state.coins.map(() => `<div class="skel card-3d"><div class="skel-line m"></div><div class="skel-line s"></div><div class="skel-line"></div></div>`).join('');
   } else {
     cards = state.coins.map(c => {
       const s = state.signals[c.symbol];
-      if (!s) return `<div class="signal-card"><div class="sig-top"><div class="sig-coin"><div class="sig-avatar">${c.symbol.substring(0,3)}</div><div><div class="sig-sym">${c.symbol}/USDT</div><div class="sig-time">في انتظار التحليل</div></div></div><span style="font-size:22px;opacity:.3">⏳</span></div></div>`;
-      if (s.error) return `<div class="signal-card"><div class="sig-top"><div class="sig-coin"><div class="sig-avatar" style="color:var(--loss)">${c.symbol.substring(0,3)}</div><div><div class="sig-sym">${c.symbol}/USDT</div><div class="sig-time" style="color:var(--loss)">${s.error}</div></div></div></div></div>`;
+      if (!s) return `<div class="signal-card card-3d"><div class="sig-top"><div class="sig-coin"><div class="sig-avatar">${c.symbol.substring(0,3)}</div><div><div class="sig-sym">${c.symbol}/USDT</div><div class="sig-time">في انتظار التحليل</div></div></div><span style="font-size:22px;opacity:.3">⏳</span></div></div>`;
+      if (s.error) return `<div class="signal-card card-3d"><div class="sig-top"><div class="sig-coin"><div class="sig-avatar" style="color:var(--loss)">${c.symbol.substring(0,3)}</div><div><div class="sig-sym">${c.symbol}/USDT</div><div class="sig-time" style="color:var(--loss)">${s.error}</div></div></div></div></div>`;
       const up=s.signal==='UP', dn=s.signal==='DOWN';
       const cc=up?'buy':dn?'sell':'wait';
       const emoji=up?'🟢 اشتري':dn?'🔴 بيع':'🟡 استنى';
       const strAr=s.strength==='STRONG'?'قوي':s.strength==='MODERATE'?'متوسط':'ضعيف';
       const cc2=up?'var(--profit)':dn?'var(--loss)':'var(--gold)';
       return `
-        <div class="signal-card ${cc}">
+        <div class="signal-card card-3d ${cc}">
           <div class="sig-top">
             <div class="sig-coin">
               <div class="sig-avatar">${c.symbol.substring(0,3)}</div>
@@ -621,7 +684,7 @@ function renderSignals() {
   }
 
   return `
-    <div class="ai-header-card">
+    <div class="ai-header-card card-3d">
       <div class="ai-header-top">
         <div class="ai-brand"><div class="ai-brand-dot"></div>🤖 مستشار AI المصري</div>
         <button class="analyze-btn" id="analyzeBtn" ${state.analyzing?'disabled':''}>${lbl}</button>
@@ -641,7 +704,7 @@ function renderSignals() {
 ════════════════════════════════════════ */
 function renderSettings() {
   return `
-    <div class="settings-block">
+    <div class="settings-block card-3d">
       <div class="settings-block-title">🪙 عملاتي (${state.coins.length})</div>
       ${state.coins.length===0 ? `<div style="padding:16px;text-align:center;color:var(--text3);font-size:13px">لا توجد عملات بعد</div>` : ''}
       ${state.coins.map((c,i) => {
@@ -660,7 +723,7 @@ function renderSettings() {
       }).join('')}
     </div>
 
-    <div class="add-form">
+    <div class="add-form card-3d">
       <div class="add-form-title">➕ إضافة عملة جديدة</div>
       <div class="form-grid">
         <div class="form-field"><label>رمز العملة</label><input id="fSymbol" type="text" class="form-input" placeholder="BTC, ETH, SOL..." autocomplete="off" spellcheck="false"></div>
@@ -674,7 +737,7 @@ function renderSettings() {
 
     <button class="save-settings-btn" id="saveSettingsBtn">💾 حفظ الإعدادات</button>
 
-    <div class="info-box">
+    <div class="info-box card-3d">
       🔥 <strong style="color:#ff6d00">Firebase</strong> Realtime Database — بياناتك محفوظة على السحابة<br>
       <span id="dbStatus2">جاري الاتصال...</span><br>
       🤖 <strong style="color:var(--accent)">AI مجاني</strong> — تحليل بالعامية المصرية<br>
@@ -689,11 +752,32 @@ function renderSettings() {
 function renderScreen() {
   const el = document.getElementById('mainScreen');
   if (!el) return;
+  
+  // Render based on current tab
   switch (state.currentTab) {
     case 'portfolio': el.innerHTML = renderPortfolio(); wirePortfolioEvents(); break;
     case 'signals':   el.innerHTML = renderSignals();   wireSignalsEvents();   break;
     case 'settings':  el.innerHTML = renderSettings();  wireSettingsEvents();  break;
   }
+  
+  // Initialize 3D effects on new elements
+  init3DEffects();
+  
+  // Number Animation for Total Portfolio Value
+  const totalValEl = document.querySelector('.total-value');
+  if (totalValEl && totalValEl.dataset.val) {
+    const endVal = parseFloat(totalValEl.dataset.val);
+    if(endVal > 0) {
+      animateValue(totalValEl, endVal * 0.9, endVal, 800, (v) => '$' + fmt(v));
+    }
+  }
+
+  // Attach haptics to all newly rendered interactive elements
+  document.querySelectorAll('button, .tab, .sidebar-btn, .h-btn, .edit-coin-btn, .cli-del').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if(!btn.classList.contains('cli-del')) haptic('light');
+    });
+  });
 }
 
 function wirePortfolioEvents() {
@@ -709,10 +793,11 @@ function wireSignalsEvents() {
 function wireSettingsEvents() {
   document.querySelectorAll('[data-del]').forEach(btn => {
     btn.addEventListener('click', () => {
+      haptic('heavy');
       const i = parseInt(btn.dataset.del);
       const sym = state.coins[i].symbol;
       state.coins.splice(i, 1); delete state.signals[sym];
-      save(); renderScreen(); toast('🗑️ تم حذف ' + sym);
+      save(); renderScreen(); toast('🗑️ تم حذف ' + sym, true);
     });
   });
   document.querySelectorAll('[data-edit]').forEach(btn => {
@@ -796,6 +881,7 @@ function initQuickPanel() {
   const chevron = document.getElementById('qpChevron');
 
   toggle?.addEventListener('click', () => {
+    haptic('light');
     const open = body.classList.toggle('open');
     chevron?.classList.toggle('open', open);
     if (open && ei) setTimeout(() => ei.focus(), 320);
@@ -823,6 +909,7 @@ function syncQP() { _syncQP(); }
    TOAST
 ════════════════════════════════════════ */
 function toast(msg, isErr=false, isGold=false) {
+  haptic(isErr ? 'heavy' : 'success'); // اهتزاز بحسب نوع الإشعار
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.className = 'toast' + (isErr?' err':'') + (isGold?' gold':'');
@@ -894,6 +981,7 @@ function startAutoRefresh() {
 ════════════════════════════════════════ */
 function initRefreshBtn() {
   document.getElementById('refreshBtn')?.addEventListener('click', async () => {
+    haptic('light');
     const btn = document.getElementById('refreshBtn');
     btn.innerHTML = '<span class="spin">🔄</span>';
     await refreshPrices();
