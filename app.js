@@ -134,6 +134,7 @@ function setDbStatus(msg) {
    FORMATTING & TOTALS
 ════════════════════════════════════════ */
 const fmt  = (n, d=2) => n==null||isNaN(n) ? '---' : Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+// تنسيق سعر العملة بدقة متناسبة مع حجمه
 const fmtP = p => {
   if (p == null || isNaN(p)) return '---';
   if (p >= 10000) return fmt(p, 0);
@@ -144,14 +145,13 @@ const fmtP = p => {
   if (p >= 0.001) return fmt(p, 7);
   return fmt(p, 8);
 };
-// تنسيق مبلغ الربح/الخسارة بدقة مناسبة (دولار)
+// تنسيق مبلغ الربح/الخسارة (دولار)
 const fmtPnl = n => {
   if (n == null || isNaN(n)) return '---';
-  const abs = Math.abs(n);
-  if (abs >= 100)  return fmt(abs, 2);
-  if (abs >= 1)    return fmt(abs, 2);
-  if (abs >= 0.01) return fmt(abs, 4);
-  return fmt(abs, 6);
+  const a = Math.abs(n);
+  if (a >= 1)    return fmt(a, 2);
+  if (a >= 0.01) return fmt(a, 4);
+  return fmt(a, 6);
 };
 const sign    = v  => v >= 0 ? '+' : '';
 const pc      = v  => v >= 0 ? 'profit' : 'loss';
@@ -174,7 +174,7 @@ function calcTotals() {
       tc += avg   * qty;
     }
   });
-  // تقريب نهائي لتجنب أخطاء الفاصلة العائمة
+  // تقريب لتجنب أخطاء الفاصلة العائمة
   tv = Math.round(tv * 1e6) / 1e6;
   tc = Math.round(tc * 1e6) / 1e6;
   return { tv, tc, tpnl: Math.round((tv - tc) * 1e6) / 1e6 };
@@ -200,15 +200,19 @@ function updateBrowserTitle(tpnl) {
 /* ════════════════════════════════════════
    WEBSOCKETS (REAL-TIME INSTANT PRICES)
 ════════════════════════════════════════ */
+// تتبع الـ symbols المحدَّثة في الـ frame الحالي
+let _pendingPortfolio = false;
+let _pendingMarket    = new Set();
+
 function initWebSocket() {
-  if (ws) ws.close();
+  if (ws) { try { ws.onclose = null; ws.close(); } catch(e){} }
   ws = new WebSocket(OKX_WS_URL);
 
   ws.onopen = () => {
+    // اشترك في كل العملات: شريط السوق + المحفظة معاً
     const instIds = new Set();
     TICKER_COINS.forEach(c => instIds.add(c.instId));
     state.coins.forEach(c => instIds.add(`${c.symbol.toUpperCase()}-USDT`));
-
     if (instIds.size > 0) {
       const args = Array.from(instIds).map(id => ({ channel: 'tickers', instId: id }));
       ws.send(JSON.stringify({ op: 'subscribe', args }));
@@ -220,34 +224,49 @@ function initWebSocket() {
     try {
       const d = JSON.parse(e.data);
       if (d.data && d.data.length > 0 && d.arg && d.arg.channel === 'tickers') {
-        const t = d.data[0];
-        const sym = d.arg.instId.replace('-USDT', '');
+        const t     = d.data[0];
+        const sym   = d.arg.instId.replace('-USDT', '');
         const price = parseFloat(t.last);
-        const open = parseFloat(t.sodUtc8 || t.open24h || t.last);
+        const open  = parseFloat(t.sodUtc8 || t.open24h || t.last);
 
+        // تحديث شريط السوق
         if (TICKER_COINS.find(c => c.sym === sym)) {
-          const prev = state.tickerPrices[sym]?.price || price;
-          state.tickerPrices[sym] = { price, change: open > 0 ? (price - open) / open * 100 : 0, prev };
+          const prev = state.tickerPrices[sym]?.price ?? price;
+          state.tickerPrices[sym] = {
+            price,
+            change: open > 0 ? (price - open) / open * 100 : 0,
+            prev
+          };
+          _pendingMarket.add(sym);
         }
 
+        // تحديث أسعار المحفظة
         if (state.coins.find(c => c.symbol === sym)) {
           state.prices[sym] = {
             price, open24h: open,
             high24h: parseFloat(t.high24h),
-            low24h: parseFloat(t.low24h),
-            vol24h: parseFloat(t.vol24h)
+            low24h:  parseFloat(t.low24h),
+            vol24h:  parseFloat(t.vol24h)
           };
+          _pendingPortfolio = true;
         }
 
         state.lastPriceUpdate = Date.now();
 
+        // تجميع كل التحديثات في frame واحد لضمان سلاسة التحديث اللحظي
         if (!uiUpdateTimer) {
           uiUpdateTimer = requestAnimationFrame(() => {
             const { tpnl } = calcTotals();
             updateBrowserTitle(tpnl);
-            syncQP(); 
-            if (state.currentTab === 'portfolio') updateLiveUI(); 
-            renderMarketBar(); 
+            syncQP();
+            // تحديث عناصر شريط السوق مباشرة بدون إعادة بناء كامل
+            _pendingMarket.forEach(s => patchMarketItem(s));
+            _pendingMarket.clear();
+            // تحديث المحفظة لو في تغيير
+            if (_pendingPortfolio && state.currentTab === 'portfolio') {
+              updateLiveUI();
+              _pendingPortfolio = false;
+            }
             checkProfitAlert(tpnl);
             uiUpdateTimer = null;
           });
@@ -278,31 +297,67 @@ async function fetchTickerPrices() {
   renderMarketBar();
 }
 
+// تنسيق سعر شريط السوق بدقة مناسبة لكل عملة
+function fmtMP(p) {
+  if (!p || isNaN(p)) return '···';
+  if (p >= 10000) return p.toLocaleString('en-US', {maximumFractionDigits: 0});
+  if (p >= 1000)  return p.toLocaleString('en-US', {minimumFractionDigits: 1, maximumFractionDigits: 1});
+  if (p >= 1)     return p.toFixed(3);
+  if (p >= 0.1)   return p.toFixed(4);
+  if (p >= 0.01)  return p.toFixed(5);
+  if (p >= 0.001) return p.toFixed(6);
+  return p.toFixed(8);
+}
+
+// بناء HTML عنصر واحد في شريط السوق
+function buildMarketItemHTML(sym) {
+  const d     = state.tickerPrices[sym];
+  const price = d ? fmtMP(d.price) : '···';
+  const ch    = d?.change ?? null;
+  const chTxt = ch !== null ? `${ch >= 0 ? '▲' : '▼'}${Math.abs(ch).toFixed(2)}%` : '';
+  const chCls = ch === null ? 'nc' : ch > 0.005 ? 'up' : ch < -0.005 ? 'dn' : 'nc';
+  const prCls = ch === null ? 'nc' : ch > 0.005 ? 'profit' : ch < -0.005 ? 'loss' : 'nc';
+  const flash = d?.prev != null ? (d.price > d.prev ? ' up-flash' : d.price < d.prev ? ' dn-flash' : '') : '';
+  return { html: `<div class="mi${flash}" data-sym="${sym}">
+    <span class="mi-sym">${sym}</span>
+    <span class="mi-price ${prCls}">${d ? '$' + price : '···'}</span>
+    ${chTxt ? `<span class="mi-chg ${chCls}">${chTxt}</span>` : '<span class="mi-chg nc">···</span>'}
+  </div>`, flash };
+}
+
+// تحديث عنصر واحد في شريط السوق في مكانه بدون إعادة بناء كاملة (لحظي وبدون وميض)
+function patchMarketItem(sym) {
+  const grid = document.getElementById('marketGrid');
+  if (!grid) return;
+  const existing = grid.querySelector(`[data-sym="${sym}"]`);
+  const { html, flash } = buildMarketItemHTML(sym);
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  const newEl = tmp.firstElementChild;
+  if (existing) {
+    // تحديث المحتوى مباشرة بدون إزالة العنصر
+    existing.className = newEl.className;
+    const prEl = existing.querySelector('.mi-price');
+    const chEl = existing.querySelector('.mi-chg');
+    const newPr = newEl.querySelector('.mi-price');
+    const newCh = newEl.querySelector('.mi-chg');
+    if (prEl && newPr) { prEl.textContent = newPr.textContent; prEl.className = newPr.className; }
+    if (chEl && newCh) { chEl.textContent = newCh.textContent; chEl.className = newCh.className; }
+    // أنيميشن flash لحظي
+    if (flash) {
+      existing.classList.add(flash.trim());
+      setTimeout(() => existing.classList.remove(flash.trim()), 600);
+    }
+  } else {
+    grid.insertAdjacentHTML('beforeend', html);
+  }
+}
+
+// بناء شريط السوق كاملاً (عند أول تحميل فقط)
 function renderMarketBar() {
   const grid = document.getElementById('marketGrid');
   if (!grid) return;
-  const fmtMP = p => {
-    if (!p || isNaN(p)) return '···';
-    if (p >= 10000) return p.toLocaleString('en-US',{maximumFractionDigits:0});
-    if (p >= 1000)  return p.toLocaleString('en-US',{minimumFractionDigits:1,maximumFractionDigits:1});
-    if (p >= 1)     return p.toFixed(3);
-    if (p >= 0.01)  return p.toFixed(4);
-    return p.toFixed(6);
-  };
-  grid.innerHTML = TICKER_COINS.map(({sym}) => {
-    const d      = state.tickerPrices[sym];
-    const price  = d ? fmtMP(d.price) : '···';
-    const ch     = d?.change ?? null;
-    const chTxt  = ch !== null ? `${ch >= 0 ? '▲' : '▼'}${Math.abs(ch).toFixed(2)}%` : '';
-    const chCls  = ch === null ? 'nc' : ch > 0.005 ? 'up' : ch < -0.005 ? 'dn' : 'nc';
-    const prCls  = ch === null ? 'nc' : ch > 0.005 ? 'profit' : ch < -0.005 ? 'loss' : 'nc';
-    const flash  = d?.prev ? (d.price > d.prev ? ' up-flash' : d.price < d.prev ? ' dn-flash' : '') : '';
-    return `<div class="mi${flash}">
-      <span class="mi-sym">${sym}</span>
-      <span class="mi-price ${prCls}">${d ? '$' + price : '···'}</span>
-      ${chTxt ? `<span class="mi-chg ${chCls}">${chTxt}</span>` : '<span class="mi-chg nc">···</span>'}
-    </div>`;
-  }).join('');
+  grid.innerHTML = TICKER_COINS.map(({sym}) => buildMarketItemHTML(sym).html).join('');
 }
 
 /* ════════════════════════════════════════
@@ -639,8 +694,9 @@ function updateLiveUI() {
     if (elVol && t?.vol24h) elVol.textContent = fmt(t.vol24h, 0);
   });
 
-  const tpnl = tv - tc, tpnlE = tpnl * eg, tpct = tc > 0 ? (tpnl / tc * 100) : 0, cls = pc(tpnl);
-  const tpnlRounded = Math.round(tpnl * 1e6) / 1e6;
+  const tpnlRaw = tv - tc;
+  const tpnl = Math.round(tpnlRaw * 1e6) / 1e6;
+  const tpnlE = tpnl * eg, tpct = tc > 0 ? (tpnl / tc * 100) : 0, cls = pc(tpnl);
 
   const elTotVal = document.getElementById('tot-val');
   if (elTotVal) { elTotVal.textContent = '$' + fmt(tv); elTotVal.className = `total-value ${cls}`; }
@@ -652,7 +708,7 @@ function updateLiveUI() {
   if (elTotPct) { elTotPct.textContent = sign(tpct) + fmt(tpct, 2) + '%'; elTotPct.className = `pnl-pct-big ${cls}`; }
 
   const elTotAbs = document.getElementById('tot-abs');
-  if (elTotAbs) { elTotAbs.textContent = sign(tpnlRounded) + '$' + fmtPnl(Math.abs(tpnlRounded)); elTotAbs.className = `pnl-abs ${cls}`; }
+  if (elTotAbs) { elTotAbs.textContent = sign(tpnl) + '$' + fmtPnl(Math.abs(tpnl)); elTotAbs.className = `pnl-abs ${cls}`; }
 
   const elTotAbsEgp = document.getElementById('tot-abs-egp');
   if (elTotAbsEgp) elTotAbsEgp.textContent = sign(tpnlE) + fmt(Math.abs(tpnlE)) + ' ج.م';
@@ -676,11 +732,10 @@ function renderPortfolio() {
     const qty   = parseFloat(c.quantity)||0, avg = parseFloat(c.avgBuy)||0;
     const val   = price!==null ? price*qty : null;
     const cost  = avg*qty;
-    // تقريب دقيق للـ PnL لتتطابق مع المنصة
-    const pnlRaw = val!==null ? val-cost : null;
-    const pnl   = pnlRaw !== null ? Math.round(pnlRaw * 1e6) / 1e6 : null;
+    const pnlRaw= val!==null ? val-cost : null;
+    const pnl   = pnlRaw!==null ? Math.round(pnlRaw*1e6)/1e6 : null;
     const pnlPct= cost>0&&pnl!==null ? (pnl/cost*100) : null;
-    const ch24  = t && t.open24h > 0 ? (t.price-t.open24h)/t.open24h*100 : null;
+    const ch24  = t && t.open24h>0 ? (t.price-t.open24h)/t.open24h*100 : null;
     if (val!==null) { tv += val; tc += cost; }
     return {c, i, price, qty, avg, val, cost, pnl, pnlPct, pnlE:pnl!==null?pnl*eg:null, ch24, tickerObj: t};
   });
