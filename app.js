@@ -114,12 +114,15 @@ function localSave() {
     localStorage.setItem('okx_signals', JSON.stringify(state.signals));
     if (state.lastSignalUpdate) localStorage.setItem('okx_sig_ts', state.lastSignalUpdate);
     // حفظ API credentials
-    localStorage.setItem('okx_api_key',    state.apiKey    || '');
-    localStorage.setItem('okx_api_secret', state.apiSecret || '');
-    localStorage.setItem('okx_api_pass',   state.apiPass   || '');
+    localStorage.setItem('okx_api_key',       state.apiKey       || '');
+    localStorage.setItem('okx_api_secret',    state.apiSecret    || '');
+    localStorage.setItem('okx_api_pass',      state.apiPass      || '');
+    // حفظ حالة الاتصال
+    localStorage.setItem('okx_api_connected', state.apiConnected ? '1' : '0');
+    if (state.lastApiSync) localStorage.setItem('okx_api_sync_ts', state.lastApiSync);
     // حفظ للإضافة (Background script)
     if (typeof chrome !== 'undefined' && chrome.storage) {
-      chrome.storage.local.set({ state_coins: state.coins });
+      chrome.storage.local.set({ state_coins: state.coins, okx_api_key: state.apiKey, okx_api_secret: state.apiSecret, okx_api_pass: state.apiPass });
     }
   } catch(e) {}
 }
@@ -127,13 +130,15 @@ function localSave() {
 function load() {
   try { state.coins      = JSON.parse(localStorage.getItem('okx_coins')        || '[]'); } catch(e){}
   try { state.signals    = JSON.parse(localStorage.getItem('okx_signals')      || '{}'); } catch(e){}
-  state.usdToEgp        = parseFloat(localStorage.getItem('okx_egp')     || '50') || 50;
-  state.alertAt         = parseFloat(localStorage.getItem('okx_alertAt') || '10') || 10;
-  state.lastSignalUpdate = parseInt(localStorage.getItem('okx_sig_ts')   || '0')  || null;
+  state.usdToEgp         = parseFloat(localStorage.getItem('okx_egp')     || '50') || 50;
+  state.alertAt          = parseFloat(localStorage.getItem('okx_alertAt') || '10') || 10;
+  state.lastSignalUpdate = parseInt(localStorage.getItem('okx_sig_ts')    || '0')  || null;
   // تحميل بيانات API
-  state.apiKey    = localStorage.getItem('okx_api_key')    || '';
-  state.apiSecret = localStorage.getItem('okx_api_secret') || '';
-  state.apiPass   = localStorage.getItem('okx_api_pass')   || '';
+  state.apiKey       = localStorage.getItem('okx_api_key')       || '';
+  state.apiSecret    = localStorage.getItem('okx_api_secret')    || '';
+  state.apiPass      = localStorage.getItem('okx_api_pass')      || '';
+  state.apiConnected = localStorage.getItem('okx_api_connected') === '1';
+  state.lastApiSync  = parseInt(localStorage.getItem('okx_api_sync_ts') || '0') || null;
 }
 
 function setDbStatus(msg) {
@@ -150,7 +155,13 @@ function setDbStatus(msg) {
 /* ════════════════════════════════════════
    OKX PRIVATE API (READ-ONLY KEY)
    يجلب الصفقات والمراكز مباشرة من المنصة
+   ✅ يدعم CORS عبر proxy بديل
+   ✅ يجيب كل عملات الحساب تلقائياً
 ════════════════════════════════════════ */
+
+// Proxy بديل لتجاوز CORS — يرسل الطلب مع headers التوقيع
+// بنستخدم allorigins.win كـ proxy بسيط أو نجرب مباشرة أولاً
+const OKX_BASE = 'https://www.okx.com';
 
 // توقيع طلبات OKX بـ HMAC-SHA256
 async function okxSign(timestamp, method, path, body = '') {
@@ -174,29 +185,83 @@ async function okxHeaders(method, path, body = '') {
     'OK-ACCESS-SIGN':       sign,
     'OK-ACCESS-TIMESTAMP':  ts,
     'OK-ACCESS-PASSPHRASE': state.apiPass,
+    'x-simulated-trading':  '0',
   };
+}
+
+// طلب OKX مع دعم CORS — يجرب مباشرة أولاً ثم عبر proxy
+async function okxFetch(path) {
+  const url = OKX_BASE + path;
+  const h = await okxHeaders('GET', path);
+  
+  // محاولة 1: مباشرة (تشتغل في Chrome Extension لأنها bypass CORS)
+  try {
+    const r = await fetch(url, { headers: h, mode: 'cors' });
+    if (r.ok) {
+      const d = await r.json();
+      if (d.code === '0') return d;
+      if (d.code !== undefined) return d; // أي رد من OKX
+    }
+  } catch(e) {
+    console.warn('Direct fetch failed, trying proxy...', e.message);
+  }
+
+  // محاولة 2: عبر corsproxy.io
+  try {
+    const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(url)}`;
+    const r2 = await fetch(proxyUrl, {
+      headers: {
+        ...h,
+        'x-cors-api-key': 'temp_demo',
+      }
+    });
+    if (r2.ok) {
+      const d = await r2.json();
+      if (d.code !== undefined) return d;
+    }
+  } catch(e) {
+    console.warn('Proxy fetch failed:', e.message);
+  }
+
+  return null;
 }
 
 // اختبار الاتصال بالـ API
 async function testApiConnection() {
   if (!state.apiKey || !state.apiSecret || !state.apiPass) return false;
   try {
-    const path = '/api/v5/account/balance';
-    const h = await okxHeaders('GET', path);
-    const r = await fetch('https://www.okx.com' + path, { headers: h });
-    const d = await r.json();
-    return d.code === '0';
+    const d = await okxFetch('/api/v5/account/balance');
+    return d && d.code === '0';
   } catch(e) { return false; }
+}
+
+// ✅ جلب كل العملات من حساب OKX (كل اللي عندها رصيد > 0)
+async function fetchAllAccountCoins() {
+  try {
+    const d = await okxFetch('/api/v5/account/balance');
+    if (!d || d.code !== '0') return null;
+    
+    const details = d.data?.[0]?.details || [];
+    // نأخذ كل عملة عندها رصيد حقيقي > 0.0001 (مش USDT)
+    return details
+      .filter(x => {
+        const total = parseFloat(x.availBal || 0) + parseFloat(x.frozenBal || 0);
+        return total > 0.0001 && x.ccy !== 'USDT' && x.ccy !== 'USDC';
+      })
+      .map(x => ({
+        ccy:     x.ccy,
+        balance: parseFloat(x.availBal || 0) + parseFloat(x.frozenBal || 0),
+        eqUsd:   parseFloat(x.eqUsd || 0),
+      }));
+  } catch(e) { return null; }
 }
 
 // جلب صفقات التنفيذ الحقيقية (fills) لعملة معينة
 async function fetchRealFills(instId) {
   try {
     const path = `/api/v5/trade/fills-history?instType=SPOT&instId=${instId}&limit=100`;
-    const h = await okxHeaders('GET', path);
-    const r = await fetch('https://www.okx.com' + path, { headers: h });
-    const d = await r.json();
-    if (d.code !== '0') return null;
+    const d = await okxFetch(path);
+    if (!d || d.code !== '0') return null;
     return d.data || [];
   } catch(e) { return null; }
 }
@@ -204,11 +269,8 @@ async function fetchRealFills(instId) {
 // جلب رصيد عملة معينة من الحساب
 async function fetchCoinBalance(ccy) {
   try {
-    const path = `/api/v5/account/balance?ccy=${ccy}`;
-    const h = await okxHeaders('GET', path);
-    const r = await fetch('https://www.okx.com' + path, { headers: h });
-    const d = await r.json();
-    if (d.code !== '0') return null;
+    const d = await okxFetch(`/api/v5/account/balance?ccy=${ccy}`);
+    if (!d || d.code !== '0') return null;
     const detail = d.data?.[0]?.details?.find(x => x.ccy === ccy);
     return detail ? parseFloat(detail.availBal) + parseFloat(detail.frozenBal || 0) : null;
   } catch(e) { return null; }
@@ -216,65 +278,105 @@ async function fetchCoinBalance(ccy) {
 
 // حساب متوسط الشراء الحقيقي من سجل الصفقات
 function calcAvgBuyFromFills(fills) {
-  // نأخذ فقط صفقات الشراء ونحسب المتوسط المرجح
   const buys = fills.filter(f => f.side === 'buy');
   if (!buys.length) return null;
   let totalCost = 0, totalQty = 0;
   buys.forEach(f => {
-    const qty  = parseFloat(f.fillSz)  || 0;
-    const price = parseFloat(f.fillPx) || 0;
-    const fee  = parseFloat(f.fee)     || 0; // fee سالب في OKX
-    totalCost += price * qty + Math.abs(fee); // نضيف الفي
+    const qty   = parseFloat(f.fillSz)  || 0;
+    const price = parseFloat(f.fillPx)  || 0;
+    const fee   = parseFloat(f.fee)     || 0;
+    totalCost += price * qty + Math.abs(fee);
     totalQty  += qty;
   });
   return totalQty > 0 ? totalCost / totalQty : null;
 }
 
-// المزامنة الكاملة مع API — يحدّث الكمية ومتوسط الشراء لكل عملة
+// ✅ المزامنة الكاملة مع API — يجيب كل عملات الحساب + يحدّث الكمية ومتوسط الشراء
 async function syncFromApi() {
   if (!state.apiKey || !state.apiSecret || !state.apiPass) return;
-  setApiStatus('🔄 جاري المزامنة مع OKX...');
-  let updated = 0;
+  setApiStatus('🔄 جاري جلب عملاتك من OKX...');
 
-  for (const coin of state.coins) {
-    try {
-      const instId = `${coin.symbol}-USDT`;
-
-      // 1. جلب الرصيد الفعلي
-      const balance = await fetchCoinBalance(coin.symbol);
-
-      // 2. جلب سجل التنفيذ
-      const fills = await fetchRealFills(instId);
-
-      if (fills && fills.length > 0) {
-        const avgBuy = calcAvgBuyFromFills(fills);
-        if (avgBuy && avgBuy > 0) {
-          coin.avgBuy = String(avgBuy);
-          updated++;
-        }
+  // STEP 1: جلب كل عملات الحساب
+  const accountCoins = await fetchAllAccountCoins();
+  
+  if (accountCoins && accountCoins.length > 0) {
+    setApiStatus(`🔄 وجدنا ${accountCoins.length} عملة — جاري جلب التفاصيل...`);
+    
+    // إضافة العملات الجديدة أو تحديث الموجودة
+    for (const ac of accountCoins) {
+      const existing = state.coins.find(c => c.symbol === ac.ccy);
+      if (!existing) {
+        // عملة جديدة — أضفها بالكمية الصح
+        state.coins.push({
+          symbol:   ac.ccy,
+          quantity: String(ac.balance),
+          avgBuy:   '0', // هنحسبها من الـ fills
+        });
+      } else {
+        // تحديث الكمية
+        existing.quantity = String(ac.balance);
       }
-
-      // استخدام الرصيد الفعلي لو جاب قيمة
-      if (balance !== null && balance > 0) {
-        coin.quantity = String(balance);
-        updated++;
-      }
-
-    } catch(e) {
-      console.warn('API sync error for', coin.symbol, e);
     }
-  }
 
-  if (updated > 0) {
+    // STEP 2: جلب متوسط الشراء من الـ fills لكل عملة
+    let fillsUpdated = 0;
+    for (const coin of state.coins) {
+      try {
+        const fills = await fetchRealFills(`${coin.symbol}-USDT`);
+        if (fills && fills.length > 0) {
+          const avgBuy = calcAvgBuyFromFills(fills);
+          if (avgBuy && avgBuy > 0) {
+            coin.avgBuy = String(avgBuy);
+            fillsUpdated++;
+          }
+        }
+      } catch(e) {
+        console.warn('Fills fetch error for', coin.symbol, e);
+      }
+    }
+
     state.apiConnected = true;
     state.lastApiSync  = Date.now();
     save();
     renderScreen();
     syncQP();
-    toast(`✅ تم مزامنة ${state.coins.length} عملة من OKX`, false, true);
+
+    // تحديث WebSocket لاشتراك العملات الجديدة
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      initWebSocket();
+    }
+
+    const msg = `✅ تم استيراد ${accountCoins.length} عملة — متوسط الشراء لـ ${fillsUpdated} عملة`;
+    toast(msg, false, true);
     setApiStatus('🟢 متصل بـ OKX API — ' + new Date().toLocaleTimeString('ar-EG'));
+
   } else {
-    setApiStatus('🟡 لم يتم العثور على بيانات');
+    // CORS مشكلة أو مفيش عملات — جرب تحديث العملات الموجودة بس
+    setApiStatus('🟡 CORS مشكلة — جاري تحديث العملات الموجودة...');
+    let updated = 0;
+
+    for (const coin of state.coins) {
+      try {
+        const fills = await fetchRealFills(`${coin.symbol}-USDT`);
+        if (fills && fills.length > 0) {
+          const avgBuy = calcAvgBuyFromFills(fills);
+          if (avgBuy && avgBuy > 0) { coin.avgBuy = String(avgBuy); updated++; }
+        }
+        const balance = await fetchCoinBalance(coin.symbol);
+        if (balance !== null && balance > 0) { coin.quantity = String(balance); updated++; }
+      } catch(e) {}
+    }
+
+    if (updated > 0) {
+      state.apiConnected = true;
+      state.lastApiSync  = Date.now();
+      save(); renderScreen(); syncQP();
+      toast(`✅ تم تحديث ${state.coins.length} عملة`, false, true);
+      setApiStatus('🟢 متصل — ' + new Date().toLocaleTimeString('ar-EG'));
+    } else {
+      setApiStatus('🔴 تعذّر الاتصال — تأكد من الـ API Key أو شغّل الإضافة');
+      toast('❌ تعذّر جلب البيانات — جرب من خلال الإضافة مباشرة', true);
+    }
   }
 }
 
@@ -1031,14 +1133,20 @@ function renderSettings() {
     </div>
 
     <div class="api-block">
-      <div class="api-block-title">🔑 ربط OKX API <span class="api-badge">${state.apiConnected ? '🟢 متصل' : '⚪ غير مفعّل'}</span></div>
+      <div class="api-block-title">🔑 ربط OKX API <span class="api-badge">${state.apiConnected ? '🟢 متصل (' + state.coins.length + ' عملة)' : '⚪ غير مفعّل'}</span></div>
       <div class="api-desc">
-        ربط مفتاح API للقراءة فقط يخلّي التطبيق يجيب كميتك الحقيقية ومتوسط شرائك تلقائياً من المنصة.<br>
-        <strong style="color:var(--loss)">⚠️ أنشئ المفتاح بصلاحية القراءة فقط (Read Only) بدون سحب أو تداول.</strong>
+        بعد الربط، التطبيق هيجيب <strong style="color:var(--teal)">كل عملاتك تلقائياً</strong> مع الكمية الحقيقية ومتوسط الشراء من سجل صفقاتك.<br>
+        <strong style="color:var(--loss)">⚠️ اختر صلاحية <em>Read Only</em> فقط — بدون سحب أو تداول.</strong>
       </div>
       <div class="api-status-row">
-        <span class="api-status-txt">${state.apiConnected ? '🟢 آخر مزامنة: ' + (state.lastApiSync ? new Date(state.lastApiSync).toLocaleTimeString('ar-EG') : '---') : '⚪ لم يتم الربط بعد'}</span>
+        <span class="api-status-txt">${state.apiConnected 
+          ? '🟢 آخر مزامنة: ' + (state.lastApiSync ? new Date(state.lastApiSync).toLocaleTimeString('ar-EG') : '---') + ' — ' + state.coins.length + ' عملة'
+          : '⚪ لم يتم الربط بعد'}</span>
       </div>
+      ${state.apiKey ? `
+      <div style="background:rgba(0,229,184,.06);border:1px solid rgba(0,229,184,.15);border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:11px;color:var(--t2)">
+        ✅ المفتاح محفوظ محلياً — ${state.apiConnected ? 'متصل' : 'اضغط مزامنة لتفعيله'}
+      </div>` : ''}
       <div class="form-field" style="margin-top:10px">
         <label>API Key</label>
         <input id="fApiKey" type="text" class="form-input" placeholder="أدخل API Key من OKX" value="${state.apiKey||''}" autocomplete="off" spellcheck="false" dir="ltr">
@@ -1051,14 +1159,18 @@ function renderSettings() {
         <label>Passphrase</label>
         <input id="fApiPass" type="password" class="form-input" placeholder="أدخل Passphrase" value="${state.apiPass||''}" autocomplete="off" dir="ltr">
       </div>
-      <div style="display:flex;gap:8px;margin-top:12px">
+      <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
         <button class="api-save-btn" id="apiSaveBtn">💾 حفظ وربط</button>
-        <button class="api-sync-btn" id="apiSyncBtn" ${!state.apiKey ? 'disabled' : ''}>🔄 مزامنة الآن</button>
+        <button class="api-sync-btn" id="apiSyncBtn" ${!state.apiKey ? 'disabled' : ''}>🔄 جلب كل عملاتي الآن</button>
         ${state.apiKey ? '<button class="api-clear-btn" id="apiClearBtn">🗑️ حذف المفتاح</button>' : ''}
       </div>
       <div class="api-how">
-        <strong>كيف تجيب المفتاح؟</strong><br>
-        OKX → الملف الشخصي → API → إنشاء مفتاح → اختر <em>Read Only</em> → أضف IP لو حبيت
+        <strong>📋 خطوات الربط:</strong><br>
+        1️⃣ OKX → الملف الشخصي → API Management<br>
+        2️⃣ إنشاء مفتاح → اختر <em><strong>Read Only</strong></em><br>
+        3️⃣ احفظ الـ Key + Secret + Passphrase هنا<br>
+        4️⃣ اضغط "جلب كل عملاتي الآن"<br><br>
+        <span style="color:var(--gold)">⚡ التطبيق يحفظ المفتاح محلياً — مش هتحتاج تدخله تاني</span>
       </div>
     </div>`;
 }
@@ -1157,29 +1269,36 @@ function wireSettingsEvents() {
     const p = document.getElementById('fApiPass')?.value.trim()   || '';
     if (!k || !s || !p) return toast('⚠️ أدخل API Key و Secret و Passphrase', true);
     state.apiKey = k; state.apiSecret = s; state.apiPass = p;
-    localSave();
+    localSave(); // حفظ فوري قبل أي حاجة
     setApiStatus('🔄 جاري التحقق من المفتاح...');
+    toast('🔄 جاري الاتصال بـ OKX...', false, false);
     const ok = await testApiConnection();
     if (ok) {
       state.apiConnected = true;
-      toast('✅ تم الربط بنجاح! جاري المزامنة...', false, true);
+      localSave();
+      toast('✅ تم الربط! جاري جلب كل عملاتك...', false, true);
       await syncFromApi();
       renderScreen();
     } else {
+      // نحفظ المفتاح حتى لو CORS منع الاختبار ونجرب syncFromApi على أي حال
       state.apiConnected = false;
-      toast('❌ فشل الاتصال — تحقق من المفتاح والـ Passphrase', true);
-      setApiStatus('🔴 فشل الاتصال — تحقق من البيانات');
+      localSave();
+      setApiStatus('🟡 CORS مشكلة — المفتاح محفوظ. جاري المحاولة...');
+      toast('⚠️ CORS block — المفتاح محفوظ. جاري المحاولة...', false, false);
+      await syncFromApi();
+      renderScreen();
     }
   });
 
   document.getElementById('apiSyncBtn')?.addEventListener('click', async () => {
     if (!state.apiKey) return toast('⚠️ أدخل API Key أولاً', true);
     await syncFromApi();
+    renderScreen();
   });
 
   document.getElementById('apiClearBtn')?.addEventListener('click', () => {
     state.apiKey = ''; state.apiSecret = ''; state.apiPass = '';
-    state.apiConnected = false;
+    state.apiConnected = false; state.lastApiSync = null;
     localSave();
     toast('🗑️ تم حذف مفتاح API');
     renderScreen();
