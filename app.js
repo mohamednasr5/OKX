@@ -135,12 +135,23 @@ function setDbStatus(msg) {
 ════════════════════════════════════════ */
 const fmt  = (n, d=2) => n==null||isNaN(n) ? '---' : Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
 const fmtP = p => {
-  if (!p || isNaN(p)) return '---';
+  if (p == null || isNaN(p)) return '---';
   if (p >= 10000) return fmt(p, 0);
   if (p >= 1000)  return fmt(p, 2);
   if (p >= 1)     return fmt(p, 4);
-  if (p >= 0.01)  return fmt(p, 5);
+  if (p >= 0.1)   return fmt(p, 5);
+  if (p >= 0.01)  return fmt(p, 6);
+  if (p >= 0.001) return fmt(p, 7);
   return fmt(p, 8);
+};
+// تنسيق مبلغ الربح/الخسارة بدقة مناسبة (دولار)
+const fmtPnl = n => {
+  if (n == null || isNaN(n)) return '---';
+  const abs = Math.abs(n);
+  if (abs >= 100)  return fmt(abs, 2);
+  if (abs >= 1)    return fmt(abs, 2);
+  if (abs >= 0.01) return fmt(abs, 4);
+  return fmt(abs, 6);
 };
 const sign    = v  => v >= 0 ? '+' : '';
 const pc      = v  => v >= 0 ? 'profit' : 'loss';
@@ -158,11 +169,15 @@ function calcTotals() {
     const price = state.prices[c.symbol]?.price ?? null;
     if (price !== null) {
       const qty = parseFloat(c.quantity) || 0;
+      const avg = parseFloat(c.avgBuy)   || 0;
       tv += price * qty;
-      tc += (parseFloat(c.avgBuy) || 0) * qty;
+      tc += avg   * qty;
     }
   });
-  return { tv, tc, tpnl: tv - tc };
+  // تقريب نهائي لتجنب أخطاء الفاصلة العائمة
+  tv = Math.round(tv * 1e6) / 1e6;
+  tc = Math.round(tc * 1e6) / 1e6;
+  return { tv, tc, tpnl: Math.round((tv - tc) * 1e6) / 1e6 };
 }
 
 function updateBrowserTitle(tpnl) {
@@ -579,9 +594,10 @@ function updateLiveUI() {
     
     const val = price !== null ? price * qty : null;
     const cost = avg * qty;
-    const pnl = val !== null ? val - cost : null;
+    const pnlRaw = val !== null ? val - cost : null;
+    const pnl = pnlRaw !== null ? Math.round(pnlRaw * 1e6) / 1e6 : null;
     const pnlPct = cost > 0 && pnl !== null ? (pnl / cost * 100) : null;
-    const ch24 = t ? (t.price - t.open24h) / t.open24h * 100 : null;
+    const ch24 = t && t.open24h > 0 ? (t.price - t.open24h) / t.open24h * 100 : null;
 
     if (val !== null) { tv += val; tc += cost; }
 
@@ -604,7 +620,7 @@ function updateLiveUI() {
     if (elVal) elVal.textContent = val !== null ? '$' + fmt(val) : '---';
 
     const elPnl = document.getElementById(`c-pnl-${c.symbol}`);
-    if (elPnl) { elPnl.textContent = pnl !== null ? sign(pnl) + '$' + fmt(Math.abs(pnl)) : '---'; elPnl.className = `pnl-usd ${cl}`; }
+    if (elPnl) { elPnl.textContent = pnl !== null ? sign(pnl) + '$' + fmtPnl(Math.abs(pnl)) : '---'; elPnl.className = `pnl-usd ${cl}`; }
 
     const elPnle = document.getElementById(`c-pnle-${c.symbol}`);
     if (elPnle) elPnle.textContent = pnl !== null ? sign(pnl * eg) + fmt(Math.abs(pnl * eg)) + ' ج.م' : '---';
@@ -624,6 +640,7 @@ function updateLiveUI() {
   });
 
   const tpnl = tv - tc, tpnlE = tpnl * eg, tpct = tc > 0 ? (tpnl / tc * 100) : 0, cls = pc(tpnl);
+  const tpnlRounded = Math.round(tpnl * 1e6) / 1e6;
 
   const elTotVal = document.getElementById('tot-val');
   if (elTotVal) { elTotVal.textContent = '$' + fmt(tv); elTotVal.className = `total-value ${cls}`; }
@@ -635,7 +652,7 @@ function updateLiveUI() {
   if (elTotPct) { elTotPct.textContent = sign(tpct) + fmt(tpct, 2) + '%'; elTotPct.className = `pnl-pct-big ${cls}`; }
 
   const elTotAbs = document.getElementById('tot-abs');
-  if (elTotAbs) { elTotAbs.textContent = sign(tpnl) + '$' + fmt(Math.abs(tpnl)); elTotAbs.className = `pnl-abs ${cls}`; }
+  if (elTotAbs) { elTotAbs.textContent = sign(tpnlRounded) + '$' + fmtPnl(Math.abs(tpnlRounded)); elTotAbs.className = `pnl-abs ${cls}`; }
 
   const elTotAbsEgp = document.getElementById('tot-abs-egp');
   if (elTotAbsEgp) elTotAbsEgp.textContent = sign(tpnlE) + fmt(Math.abs(tpnlE)) + ' ج.م';
@@ -659,14 +676,17 @@ function renderPortfolio() {
     const qty   = parseFloat(c.quantity)||0, avg = parseFloat(c.avgBuy)||0;
     const val   = price!==null ? price*qty : null;
     const cost  = avg*qty;
-    const pnl   = val!==null ? val-cost : null;
+    // تقريب دقيق للـ PnL لتتطابق مع المنصة
+    const pnlRaw = val!==null ? val-cost : null;
+    const pnl   = pnlRaw !== null ? Math.round(pnlRaw * 1e6) / 1e6 : null;
     const pnlPct= cost>0&&pnl!==null ? (pnl/cost*100) : null;
-    const ch24  = t ? (t.price-t.open24h)/t.open24h*100 : null;
+    const ch24  = t && t.open24h > 0 ? (t.price-t.open24h)/t.open24h*100 : null;
     if (val!==null) { tv += val; tc += cost; }
     return {c, i, price, qty, avg, val, cost, pnl, pnlPct, pnlE:pnl!==null?pnl*eg:null, ch24, tickerObj: t};
   });
 
-  const tpnl=tv-tc, tpnlE=tpnl*eg, tpct=tc>0?(tpnl/tc*100):0, cls=pc(tpnl);
+  const tpnlRaw=tv-tc;
+  const tpnl=Math.round(tpnlRaw*1e6)/1e6, tpnlE=tpnl*eg, tpct=tc>0?(tpnl/tc*100):0, cls=pc(tpnl);
   const hasExpanded = state.expandedIndex !== null;
 
   let html = `
@@ -679,13 +699,13 @@ function renderPortfolio() {
         </div>
         <div class="pnl-badge">
           <div class="pnl-pct-big ${cls}" id="tot-pct">${sign(tpct)}${fmt(tpct,2)}%</div>
-          <div class="pnl-abs ${cls}" id="tot-abs">${sign(tpnl)}$${fmt(Math.abs(tpnl))}</div>
+          <div class="pnl-abs ${cls}" id="tot-abs">${sign(tpnl)}$${fmtPnl(Math.abs(tpnl))}</div>
           <div class="pnl-abs" id="tot-abs-egp">${sign(tpnlE)}${fmt(Math.abs(tpnlE))} ج.م</div>
         </div>
       </div>
       <div class="summary-stats">
         <div class="stat-box"><div class="stat-label">التكلفة</div><div class="stat-val">$${fmt(tc,0)}</div><div class="stat-sub">${fmt(tc*eg,0)} ج.م</div></div>
-        <div class="stat-box"><div class="stat-label">الربح/الخسارة</div><div class="stat-val ${cls}" id="st-pnl">${sign(tpnl)}$${fmt(Math.abs(tpnl))}</div><div class="sum-stat-sub ${cls}" id="st-pnle">${sign(tpnlE)}${fmt(Math.abs(tpnlE))} ج.م</div></div>
+        <div class="stat-box"><div class="stat-label">الربح/الخسارة</div><div class="stat-val ${cls}" id="st-pnl">${sign(tpnl)}$${fmtPnl(Math.abs(tpnl))}</div><div class="sum-stat-sub ${cls}" id="st-pnle">${sign(tpnlE)}${fmt(Math.abs(tpnlE))} ج.م</div></div>
         <div class="stat-box"><div class="stat-label">العملات</div><div class="stat-val">${state.coins.length}</div><div class="stat-sub">مباشر ⚡</div></div>
       </div>
     </div>
@@ -728,7 +748,7 @@ function renderPortfolio() {
       </div>
       <div class="coin-pnl-row">
         <div>
-          <div class="pnl-usd ${cl}" id="c-pnl-${c.symbol}">${pnl!==null?sign(pnl)+'$'+fmt(Math.abs(pnl)):'---'}</div>
+          <div class="pnl-usd ${cl}" id="c-pnl-${c.symbol}">${pnl!==null?sign(pnl)+'$'+fmtPnl(Math.abs(pnl)):'---'}</div>
           <div class="pnl-egp-sub" id="c-pnle-${c.symbol}">${pnlE!==null?sign(pnlE)+fmt(Math.abs(pnlE))+' ج.م':'---'}</div>
         </div>
         <div class="pnl-actions">
