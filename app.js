@@ -242,16 +242,18 @@ async function fetchAllAccountCoins() {
     if (!d || d.code !== '0') return null;
     
     const details = d.data?.[0]?.details || [];
-    // نأخذ كل عملة عندها رصيد حقيقي > 0.0001 (مش USDT)
+    // نأخذ كل عملة عندها رصيد > 0.0001 (مش USDT/USDC)
     return details
       .filter(x => {
         const total = parseFloat(x.availBal || 0) + parseFloat(x.frozenBal || 0);
         return total > 0.0001 && x.ccy !== 'USDT' && x.ccy !== 'USDC';
       })
       .map(x => ({
-        ccy:     x.ccy,
-        balance: parseFloat(x.availBal || 0) + parseFloat(x.frozenBal || 0),
-        eqUsd:   parseFloat(x.eqUsd || 0),
+        ccy:      x.ccy,
+        balance:  parseFloat(x.availBal || 0) + parseFloat(x.frozenBal || 0),
+        eqUsd:    parseFloat(x.eqUsd    || 0),
+        // OKX بيرجع سعر التكلفة مباشرة — نستخدمه لو موجود
+        avgPrice: parseFloat(x.avgPx   || 0),
       }));
   } catch(e) { return null; }
 }
@@ -276,19 +278,52 @@ async function fetchCoinBalance(ccy) {
   } catch(e) { return null; }
 }
 
-// حساب متوسط الشراء الحقيقي من سجل الصفقات
-function calcAvgBuyFromFills(fills) {
-  const buys = fills.filter(f => f.side === 'buy');
-  if (!buys.length) return null;
-  let totalCost = 0, totalQty = 0;
-  buys.forEach(f => {
+// حساب متوسط الشراء الحقيقي — FIFO بيأخذ بس الصفقات اللي بتغطي الكمية الحالية المتبقية
+// هكذا لو باعت جزء من عملتك، متوسط الشراء بيتحسب صح
+function calcAvgBuyFromFills(fills, currentQty) {
+  // ترتيب الصفقات من الأحدث للأقدم (LIFO → FIFO للكمية المتبقية)
+  const allTrades = [...fills].sort((a, b) => parseInt(b.ts) - parseInt(a.ts));
+
+  let remaining = currentQty || 0;
+  let totalCost = 0;
+  let totalQty  = 0;
+
+  for (const f of allTrades) {
+    if (remaining <= 0) break;
+    const side  = f.side;
     const qty   = parseFloat(f.fillSz)  || 0;
     const price = parseFloat(f.fillPx)  || 0;
-    const fee   = parseFloat(f.fee)     || 0;
-    totalCost += price * qty + Math.abs(fee);
-    totalQty  += qty;
-  });
-  return totalQty > 0 ? totalCost / totalQty : null;
+    const fee   = parseFloat(f.fee)     || 0; // fee سالب في OKX
+
+    if (side === 'sell') {
+      // بيع يعني قبله شراء اتحسب — نزود الـ remaining
+      remaining += qty;
+    } else if (side === 'buy') {
+      const take = Math.min(qty, remaining);
+      // نسبة الفي المنسوبة لهذه الكمية
+      const feePart = qty > 0 ? (Math.abs(fee) / qty) * take : 0;
+      totalCost += price * take + feePart;
+      totalQty  += take;
+      remaining -= take;
+    }
+  }
+
+  // fallback: لو FIFO مادّيش نتيجة، نرجع لـ weighted average بسيط على كل الشراء
+  if (totalQty <= 0) {
+    const buys = fills.filter(f => f.side === 'buy');
+    if (!buys.length) return null;
+    let tc = 0, tq = 0;
+    buys.forEach(f => {
+      const q = parseFloat(f.fillSz) || 0;
+      const p = parseFloat(f.fillPx) || 0;
+      const fe = parseFloat(f.fee)   || 0;
+      tc += p * q + Math.abs(fe);
+      tq += q;
+    });
+    return tq > 0 ? tc / tq : null;
+  }
+
+  return totalCost / totalQty;
 }
 
 // ✅ المزامنة الكاملة مع API — يجيب كل عملات الحساب + يحدّث الكمية ومتوسط الشراء
@@ -306,27 +341,35 @@ async function syncFromApi() {
     for (const ac of accountCoins) {
       const existing = state.coins.find(c => c.symbol === ac.ccy);
       if (!existing) {
-        // عملة جديدة — أضفها بالكمية الصح
         state.coins.push({
           symbol:   ac.ccy,
           quantity: String(ac.balance),
-          avgBuy:   '0', // هنحسبها من الـ fills
+          // ✅ OKX بيرجع avgPx (سعر الكلفة) مباشرة — استخدمه فوراً
+          avgBuy:   ac.avgPrice > 0 ? String(ac.avgPrice) : '0',
         });
       } else {
-        // تحديث الكمية
         existing.quantity = String(ac.balance);
+        // ✅ حدّث متوسط الشراء من OKX مباشرة لو موجود
+        if (ac.avgPrice > 0) existing.avgBuy = String(ac.avgPrice);
       }
     }
 
-    // STEP 2: جلب متوسط الشراء من الـ fills لكل عملة
+    // STEP 2: جلب متوسط الشراء من الـ fills — فقط لو OKX ما رجعش avgPx
     let fillsUpdated = 0;
     for (const coin of state.coins) {
+      // لو OKX رجّع avgPrice مباشرة (من STEP 1) — مش محتاجين fills
+      const alreadyHasAvg = parseFloat(coin.avgBuy) > 0;
       try {
         const fills = await fetchRealFills(`${coin.symbol}-USDT`);
         if (fills && fills.length > 0) {
-          const avgBuy = calcAvgBuyFromFills(fills);
+          const currentQty = parseFloat(coin.quantity) || 0;
+          const avgBuy = calcAvgBuyFromFills(fills, currentQty);
           if (avgBuy && avgBuy > 0) {
-            coin.avgBuy = String(avgBuy);
+            // لو OKX رجّع avgPx وهو مختلف عن الـ fills بكتير — الـ fills أدق
+            // لو مش عنده avgBuy خالص — خد من الـ fills
+            if (!alreadyHasAvg) {
+              coin.avgBuy = String(avgBuy);
+            }
             fillsUpdated++;
           }
         }
@@ -359,7 +402,8 @@ async function syncFromApi() {
       try {
         const fills = await fetchRealFills(`${coin.symbol}-USDT`);
         if (fills && fills.length > 0) {
-          const avgBuy = calcAvgBuyFromFills(fills);
+          const currentQty = parseFloat(coin.quantity) || 0;
+          const avgBuy = calcAvgBuyFromFills(fills, currentQty);
           if (avgBuy && avgBuy > 0) { coin.avgBuy = String(avgBuy); updated++; }
         }
         const balance = await fetchCoinBalance(coin.symbol);
