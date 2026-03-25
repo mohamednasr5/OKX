@@ -7,7 +7,11 @@
 ════════════════════════════════════════ */
 const OKX_TICKER  = 'https://www.okx.com/api/v5/market/ticker';
 const OKX_CANDLES = 'https://www.okx.com/api/v5/market/candles';
-const OKX_WS_URL  = 'wss://ws.okx.com:8443/ws/v5/public';
+const OKX_WS_URL     = 'wss://ws.okx.com:8443/ws/v5/public';
+const OKX_ACCOUNT    = 'https://www.okx.com/api/v5/account/balance';
+const OKX_POSITIONS  = 'https://www.okx.com/api/v5/account/positions';
+const OKX_FILLS      = 'https://www.okx.com/api/v5/trade/fills-history';
+const OKX_ORDERS_HX  = 'https://www.okx.com/api/v5/trade/orders-history-archive';
 // رابط قاعدة البيانات السحابية (بدون الحاجة لسكريبتات Firebase)
 const FB_REST_URL = 'https://okx01-3c8d1-default-rtdb.firebaseio.com/my_portfolio.json';
 
@@ -34,6 +38,12 @@ let state = {
   analyzing: false,
   alertFired: {},
   expandedIndex: null,
+  // OKX API credentials (read-only key — لا تعطيها صلاحيات سحب أو تداول)
+  apiKey:    '',
+  apiSecret: '',
+  apiPass:   '',
+  apiConnected: false,
+  lastApiSync: null,
 };
 
 let ws = null;
@@ -50,18 +60,12 @@ async function syncFromCloud() {
     const data = await res.json();
     
     if (data && !isSaving) {
-      // تطبيع البيانات: ضمان أن الأرقام أرقام وليست نصوص
-      const normCoins = (data.coins || []).map(c => ({
-        ...c,
-        quantity: String(c.quantity ?? ''),
-        avgBuy:   String(c.avgBuy   ?? ''),
-      }));
-      const cloudCoinsStr = JSON.stringify(normCoins);
+      const cloudCoinsStr = JSON.stringify(data.coins || []);
       const localCoinsStr = JSON.stringify(state.coins);
       
       // إذا كان هناك اختلاف بين السحابة والمحلي، قم بالتحديث
       if (cloudCoinsStr !== localCoinsStr || data.usdToEgp !== state.usdToEgp || data.alertAt !== state.alertAt) {
-        state.coins = normCoins;
+        state.coins = data.coins || [];
         state.usdToEgp = data.usdToEgp || 50;
         state.alertAt = data.alertAt || 10;
         
@@ -109,7 +113,10 @@ function localSave() {
     localStorage.setItem('okx_alertAt', state.alertAt);
     localStorage.setItem('okx_signals', JSON.stringify(state.signals));
     if (state.lastSignalUpdate) localStorage.setItem('okx_sig_ts', state.lastSignalUpdate);
-    
+    // حفظ API credentials
+    localStorage.setItem('okx_api_key',    state.apiKey    || '');
+    localStorage.setItem('okx_api_secret', state.apiSecret || '');
+    localStorage.setItem('okx_api_pass',   state.apiPass   || '');
     // حفظ للإضافة (Background script)
     if (typeof chrome !== 'undefined' && chrome.storage) {
       chrome.storage.local.set({ state_coins: state.coins });
@@ -118,19 +125,15 @@ function localSave() {
 }
 
 function load() {
-  try {
-    const raw = JSON.parse(localStorage.getItem('okx_coins') || '[]');
-    // تطبيع: ضمان quantity و avgBuy كـ strings دايماً
-    state.coins = raw.map(c => ({
-      ...c,
-      quantity: String(c.quantity ?? ''),
-      avgBuy:   String(c.avgBuy   ?? ''),
-    }));
-  } catch(e){ state.coins = []; }
+  try { state.coins      = JSON.parse(localStorage.getItem('okx_coins')        || '[]'); } catch(e){}
   try { state.signals    = JSON.parse(localStorage.getItem('okx_signals')      || '{}'); } catch(e){}
   state.usdToEgp        = parseFloat(localStorage.getItem('okx_egp')     || '50') || 50;
   state.alertAt         = parseFloat(localStorage.getItem('okx_alertAt') || '10') || 10;
   state.lastSignalUpdate = parseInt(localStorage.getItem('okx_sig_ts')   || '0')  || null;
+  // تحميل بيانات API
+  state.apiKey    = localStorage.getItem('okx_api_key')    || '';
+  state.apiSecret = localStorage.getItem('okx_api_secret') || '';
+  state.apiPass   = localStorage.getItem('okx_api_pass')   || '';
 }
 
 function setDbStatus(msg) {
@@ -145,26 +148,162 @@ function setDbStatus(msg) {
 }
 
 /* ════════════════════════════════════════
+   OKX PRIVATE API (READ-ONLY KEY)
+   يجلب الصفقات والمراكز مباشرة من المنصة
+════════════════════════════════════════ */
+
+// توقيع طلبات OKX بـ HMAC-SHA256
+async function okxSign(timestamp, method, path, body = '') {
+  const msg = timestamp + method + path + body;
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw', enc.encode(state.apiSecret),
+    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(msg));
+  return btoa(String.fromCharCode(...new Uint8Array(sig)));
+}
+
+// headers مشتركة لكل طلب خاص
+async function okxHeaders(method, path, body = '') {
+  const ts = new Date().toISOString();
+  const sign = await okxSign(ts, method, path, body);
+  return {
+    'Content-Type':         'application/json',
+    'OK-ACCESS-KEY':        state.apiKey,
+    'OK-ACCESS-SIGN':       sign,
+    'OK-ACCESS-TIMESTAMP':  ts,
+    'OK-ACCESS-PASSPHRASE': state.apiPass,
+  };
+}
+
+// اختبار الاتصال بالـ API
+async function testApiConnection() {
+  if (!state.apiKey || !state.apiSecret || !state.apiPass) return false;
+  try {
+    const path = '/api/v5/account/balance';
+    const h = await okxHeaders('GET', path);
+    const r = await fetch('https://www.okx.com' + path, { headers: h });
+    const d = await r.json();
+    return d.code === '0';
+  } catch(e) { return false; }
+}
+
+// جلب صفقات التنفيذ الحقيقية (fills) لعملة معينة
+async function fetchRealFills(instId) {
+  try {
+    const path = `/api/v5/trade/fills-history?instType=SPOT&instId=${instId}&limit=100`;
+    const h = await okxHeaders('GET', path);
+    const r = await fetch('https://www.okx.com' + path, { headers: h });
+    const d = await r.json();
+    if (d.code !== '0') return null;
+    return d.data || [];
+  } catch(e) { return null; }
+}
+
+// جلب رصيد عملة معينة من الحساب
+async function fetchCoinBalance(ccy) {
+  try {
+    const path = `/api/v5/account/balance?ccy=${ccy}`;
+    const h = await okxHeaders('GET', path);
+    const r = await fetch('https://www.okx.com' + path, { headers: h });
+    const d = await r.json();
+    if (d.code !== '0') return null;
+    const detail = d.data?.[0]?.details?.find(x => x.ccy === ccy);
+    return detail ? parseFloat(detail.availBal) + parseFloat(detail.frozenBal || 0) : null;
+  } catch(e) { return null; }
+}
+
+// حساب متوسط الشراء الحقيقي من سجل الصفقات
+function calcAvgBuyFromFills(fills) {
+  // نأخذ فقط صفقات الشراء ونحسب المتوسط المرجح
+  const buys = fills.filter(f => f.side === 'buy');
+  if (!buys.length) return null;
+  let totalCost = 0, totalQty = 0;
+  buys.forEach(f => {
+    const qty  = parseFloat(f.fillSz)  || 0;
+    const price = parseFloat(f.fillPx) || 0;
+    const fee  = parseFloat(f.fee)     || 0; // fee سالب في OKX
+    totalCost += price * qty + Math.abs(fee); // نضيف الفي
+    totalQty  += qty;
+  });
+  return totalQty > 0 ? totalCost / totalQty : null;
+}
+
+// المزامنة الكاملة مع API — يحدّث الكمية ومتوسط الشراء لكل عملة
+async function syncFromApi() {
+  if (!state.apiKey || !state.apiSecret || !state.apiPass) return;
+  setApiStatus('🔄 جاري المزامنة مع OKX...');
+  let updated = 0;
+
+  for (const coin of state.coins) {
+    try {
+      const instId = `${coin.symbol}-USDT`;
+
+      // 1. جلب الرصيد الفعلي
+      const balance = await fetchCoinBalance(coin.symbol);
+
+      // 2. جلب سجل التنفيذ
+      const fills = await fetchRealFills(instId);
+
+      if (fills && fills.length > 0) {
+        const avgBuy = calcAvgBuyFromFills(fills);
+        if (avgBuy && avgBuy > 0) {
+          coin.avgBuy = String(avgBuy);
+          updated++;
+        }
+      }
+
+      // استخدام الرصيد الفعلي لو جاب قيمة
+      if (balance !== null && balance > 0) {
+        coin.quantity = String(balance);
+        updated++;
+      }
+
+    } catch(e) {
+      console.warn('API sync error for', coin.symbol, e);
+    }
+  }
+
+  if (updated > 0) {
+    state.apiConnected = true;
+    state.lastApiSync  = Date.now();
+    save();
+    renderScreen();
+    syncQP();
+    toast(`✅ تم مزامنة ${state.coins.length} عملة من OKX`, false, true);
+    setApiStatus('🟢 متصل بـ OKX API — ' + new Date().toLocaleTimeString('ar-EG'));
+  } else {
+    setApiStatus('🟡 لم يتم العثور على بيانات');
+  }
+}
+
+function setApiStatus(msg) {
+  document.querySelectorAll('.api-status-txt').forEach(el => el.textContent = msg);
+}
+
+// مزامنة تلقائية كل 5 دقائق لو API مفعّل
+function startApiAutoSync() {
+  setInterval(async () => {
+    if (state.apiKey && state.apiSecret && state.apiPass) {
+      await syncFromApi();
+    }
+  }, 5 * 60 * 1000);
+}
+
+
+
+/* ════════════════════════════════════════
    FORMATTING & TOTALS
 ════════════════════════════════════════ */
 const fmt  = (n, d=2) => n==null||isNaN(n) ? '---' : Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
 const fmtP = p => {
-  if (p == null || isNaN(p)) return '---';
+  if (!p || isNaN(p)) return '---';
   if (p >= 10000) return fmt(p, 0);
   if (p >= 1000)  return fmt(p, 2);
   if (p >= 1)     return fmt(p, 4);
-  if (p >= 0.1)   return fmt(p, 5);
-  if (p >= 0.01)  return fmt(p, 6);
-  if (p >= 0.001) return fmt(p, 7);
+  if (p >= 0.01)  return fmt(p, 5);
   return fmt(p, 8);
-};
-// تنسيق مبلغ الربح/الخسارة بدقة مناسبة
-const fmtPnl = n => {
-  if (n == null || isNaN(n)) return '---';
-  const a = Math.abs(n);
-  if (a >= 1)    return fmt(a, 2);
-  if (a >= 0.01) return fmt(a, 4);
-  return fmt(a, 6);
 };
 const sign    = v  => v >= 0 ? '+' : '';
 const pc      = v  => v >= 0 ? 'profit' : 'loss';
@@ -181,16 +320,12 @@ function calcTotals() {
   state.coins.forEach(c => {
     const price = state.prices[c.symbol]?.price ?? null;
     if (price !== null) {
-      const qty = Math.abs(Number(c.quantity)) || 0;
-      const avg = Math.abs(Number(c.avgBuy))   || 0;
+      const qty = parseFloat(c.quantity) || 0;
       tv += price * qty;
-      tc += avg   * qty;
+      tc += (parseFloat(c.avgBuy) || 0) * qty;
     }
   });
-  // تقريب نهائي لإزالة أخطاء الفاصلة العائمة
-  tv = Math.round(tv * 1e6) / 1e6;
-  tc = Math.round(tc * 1e6) / 1e6;
-  return { tv, tc, tpnl: Math.round((tv - tc) * 1e6) / 1e6 };
+  return { tv, tc, tpnl: tv - tc };
 }
 
 function updateBrowserTitle(tpnl) {
@@ -602,15 +737,14 @@ function updateLiveUI() {
   state.coins.forEach(c => {
     const t = state.prices[c.symbol];
     const price = t?.price ?? null;
-    const qty = Math.abs(Number(c.quantity)) || 0;
-    const avg = Math.abs(Number(c.avgBuy))   || 0;
+    const qty = parseFloat(c.quantity) || 0;
+    const avg = parseFloat(c.avgBuy) || 0;
     
     const val = price !== null ? price * qty : null;
     const cost = avg * qty;
-    const pnlRaw = val !== null ? val - cost : null;
-    const pnl = pnlRaw !== null ? Math.round(pnlRaw * 1e6) / 1e6 : null;
+    const pnl = val !== null ? val - cost : null;
     const pnlPct = cost > 0 && pnl !== null ? (pnl / cost * 100) : null;
-    const ch24 = (t && t.open24h > 0) ? (t.price - t.open24h) / t.open24h * 100 : null;
+    const ch24 = t ? (t.price - t.open24h) / t.open24h * 100 : null;
 
     if (val !== null) { tv += val; tc += cost; }
 
@@ -633,7 +767,7 @@ function updateLiveUI() {
     if (elVal) elVal.textContent = val !== null ? '$' + fmt(val) : '---';
 
     const elPnl = document.getElementById(`c-pnl-${c.symbol}`);
-    if (elPnl) { elPnl.textContent = pnl !== null ? sign(pnl) + '$' + fmtPnl(Math.abs(pnl)) : '---'; elPnl.className = `pnl-usd ${cl}`; }
+    if (elPnl) { elPnl.textContent = pnl !== null ? sign(pnl) + '$' + fmt(Math.abs(pnl)) : '---'; elPnl.className = `pnl-usd ${cl}`; }
 
     const elPnle = document.getElementById(`c-pnle-${c.symbol}`);
     if (elPnle) elPnle.textContent = pnl !== null ? sign(pnl * eg) + fmt(Math.abs(pnl * eg)) + ' ج.م' : '---';
@@ -652,9 +786,7 @@ function updateLiveUI() {
     if (elVol && t?.vol24h) elVol.textContent = fmt(t.vol24h, 0);
   });
 
-  const _tpnlRaw2 = tv - tc;
-  const tpnl = Math.round(_tpnlRaw2 * 1e6) / 1e6;
-  const tpnlE = tpnl * eg, tpct = tc > 0 ? (tpnl / tc * 100) : 0, cls = pc(tpnl);
+  const tpnl = tv - tc, tpnlE = tpnl * eg, tpct = tc > 0 ? (tpnl / tc * 100) : 0, cls = pc(tpnl);
 
   const elTotVal = document.getElementById('tot-val');
   if (elTotVal) { elTotVal.textContent = '$' + fmt(tv); elTotVal.className = `total-value ${cls}`; }
@@ -666,7 +798,7 @@ function updateLiveUI() {
   if (elTotPct) { elTotPct.textContent = sign(tpct) + fmt(tpct, 2) + '%'; elTotPct.className = `pnl-pct-big ${cls}`; }
 
   const elTotAbs = document.getElementById('tot-abs');
-  if (elTotAbs) { elTotAbs.textContent = sign(tpnl) + '$' + fmtPnl(Math.abs(tpnl)); elTotAbs.className = `pnl-abs ${cls}`; }
+  if (elTotAbs) { elTotAbs.textContent = sign(tpnl) + '$' + fmt(Math.abs(tpnl)); elTotAbs.className = `pnl-abs ${cls}`; }
 
   const elTotAbsEgp = document.getElementById('tot-abs-egp');
   if (elTotAbsEgp) elTotAbsEgp.textContent = sign(tpnlE) + fmt(Math.abs(tpnlE)) + ' ج.م';
@@ -687,19 +819,17 @@ function renderPortfolio() {
   const rows = state.coins.map((c,i) => {
     const t   = state.prices[c.symbol];
     const price = t?.price ?? null;
-    const qty   = Math.abs(Number(c.quantity))||0, avg = Math.abs(Number(c.avgBuy))||0;
+    const qty   = parseFloat(c.quantity)||0, avg = parseFloat(c.avgBuy)||0;
     const val   = price!==null ? price*qty : null;
     const cost  = avg*qty;
-    const pnlRaw= val!==null ? val-cost : null;
-    const pnl   = pnlRaw!==null ? Math.round(pnlRaw*1e6)/1e6 : null;
+    const pnl   = val!==null ? val-cost : null;
     const pnlPct= cost>0&&pnl!==null ? (pnl/cost*100) : null;
-    const ch24  = (t && t.open24h > 0) ? (t.price-t.open24h)/t.open24h*100 : null;
+    const ch24  = t ? (t.price-t.open24h)/t.open24h*100 : null;
     if (val!==null) { tv += val; tc += cost; }
     return {c, i, price, qty, avg, val, cost, pnl, pnlPct, pnlE:pnl!==null?pnl*eg:null, ch24, tickerObj: t};
   });
 
-  const _tpnlRaw=tv-tc;
-  const tpnl=Math.round(_tpnlRaw*1e6)/1e6, tpnlE=tpnl*eg, tpct=tc>0?(tpnl/tc*100):0, cls=pc(tpnl);
+  const tpnl=tv-tc, tpnlE=tpnl*eg, tpct=tc>0?(tpnl/tc*100):0, cls=pc(tpnl);
   const hasExpanded = state.expandedIndex !== null;
 
   let html = `
@@ -712,13 +842,13 @@ function renderPortfolio() {
         </div>
         <div class="pnl-badge">
           <div class="pnl-pct-big ${cls}" id="tot-pct">${sign(tpct)}${fmt(tpct,2)}%</div>
-          <div class="pnl-abs ${cls}" id="tot-abs">${sign(tpnl)}$${fmtPnl(Math.abs(tpnl))}</div>
+          <div class="pnl-abs ${cls}" id="tot-abs">${sign(tpnl)}$${fmt(Math.abs(tpnl))}</div>
           <div class="pnl-abs" id="tot-abs-egp">${sign(tpnlE)}${fmt(Math.abs(tpnlE))} ج.م</div>
         </div>
       </div>
       <div class="summary-stats">
         <div class="stat-box"><div class="stat-label">التكلفة</div><div class="stat-val">$${fmt(tc,0)}</div><div class="stat-sub">${fmt(tc*eg,0)} ج.م</div></div>
-        <div class="stat-box"><div class="stat-label">الربح/الخسارة</div><div class="stat-val ${cls}" id="st-pnl">${sign(tpnl)}$${fmtPnl(Math.abs(tpnl))}</div><div class="sum-stat-sub ${cls}" id="st-pnle">${sign(tpnlE)}${fmt(Math.abs(tpnlE))} ج.م</div></div>
+        <div class="stat-box"><div class="stat-label">الربح/الخسارة</div><div class="stat-val ${cls}" id="st-pnl">${sign(tpnl)}$${fmt(Math.abs(tpnl))}</div><div class="sum-stat-sub ${cls}" id="st-pnle">${sign(tpnlE)}${fmt(Math.abs(tpnlE))} ج.م</div></div>
         <div class="stat-box"><div class="stat-label">العملات</div><div class="stat-val">${state.coins.length}</div><div class="stat-sub">مباشر ⚡</div></div>
       </div>
     </div>
@@ -761,7 +891,7 @@ function renderPortfolio() {
       </div>
       <div class="coin-pnl-row">
         <div>
-          <div class="pnl-usd ${cl}" id="c-pnl-${c.symbol}">${pnl!==null?sign(pnl)+'$'+fmtPnl(Math.abs(pnl)):'---'}</div>
+          <div class="pnl-usd ${cl}" id="c-pnl-${c.symbol}">${pnl!==null?sign(pnl)+'$'+fmt(Math.abs(pnl)):'---'}</div>
           <div class="pnl-egp-sub" id="c-pnle-${c.symbol}">${pnlE!==null?sign(pnlE)+fmt(Math.abs(pnlE))+' ج.م':'---'}</div>
         </div>
         <div class="pnl-actions">
@@ -898,6 +1028,38 @@ function renderSettings() {
       <span id="dbStatus2">جاري الاتصال...</span><br>
       🤖 <strong style="color:var(--accent)">مستشار AI مدمج</strong> — مفيش أخطاء تانية<br>
       ⏱️ تحليل تلقائي كل <strong style="color:var(--accent)">5 دقائق</strong>
+    </div>
+
+    <div class="api-block">
+      <div class="api-block-title">🔑 ربط OKX API <span class="api-badge">${state.apiConnected ? '🟢 متصل' : '⚪ غير مفعّل'}</span></div>
+      <div class="api-desc">
+        ربط مفتاح API للقراءة فقط يخلّي التطبيق يجيب كميتك الحقيقية ومتوسط شرائك تلقائياً من المنصة.<br>
+        <strong style="color:var(--loss)">⚠️ أنشئ المفتاح بصلاحية القراءة فقط (Read Only) بدون سحب أو تداول.</strong>
+      </div>
+      <div class="api-status-row">
+        <span class="api-status-txt">${state.apiConnected ? '🟢 آخر مزامنة: ' + (state.lastApiSync ? new Date(state.lastApiSync).toLocaleTimeString('ar-EG') : '---') : '⚪ لم يتم الربط بعد'}</span>
+      </div>
+      <div class="form-field" style="margin-top:10px">
+        <label>API Key</label>
+        <input id="fApiKey" type="text" class="form-input" placeholder="أدخل API Key من OKX" value="${state.apiKey||''}" autocomplete="off" spellcheck="false" dir="ltr">
+      </div>
+      <div class="form-field" style="margin-top:8px">
+        <label>Secret Key</label>
+        <input id="fApiSecret" type="password" class="form-input" placeholder="أدخل Secret Key" value="${state.apiSecret||''}" autocomplete="off" dir="ltr">
+      </div>
+      <div class="form-field" style="margin-top:8px">
+        <label>Passphrase</label>
+        <input id="fApiPass" type="password" class="form-input" placeholder="أدخل Passphrase" value="${state.apiPass||''}" autocomplete="off" dir="ltr">
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="api-save-btn" id="apiSaveBtn">💾 حفظ وربط</button>
+        <button class="api-sync-btn" id="apiSyncBtn" ${!state.apiKey ? 'disabled' : ''}>🔄 مزامنة الآن</button>
+        ${state.apiKey ? '<button class="api-clear-btn" id="apiClearBtn">🗑️ حذف المفتاح</button>' : ''}
+      </div>
+      <div class="api-how">
+        <strong>كيف تجيب المفتاح؟</strong><br>
+        OKX → الملف الشخصي → API → إنشاء مفتاح → اختر <em>Read Only</em> → أضف IP لو حبيت
+      </div>
     </div>`;
 }
 
@@ -987,6 +1149,41 @@ function wireSettingsEvents() {
   const d2 = document.getElementById('dbStatus2');
   const d1 = document.getElementById('dbStatus');
   if (d2 && d1) d2.textContent = d1.textContent;
+
+  // أزرار API
+  document.getElementById('apiSaveBtn')?.addEventListener('click', async () => {
+    const k = document.getElementById('fApiKey')?.value.trim()    || '';
+    const s = document.getElementById('fApiSecret')?.value.trim() || '';
+    const p = document.getElementById('fApiPass')?.value.trim()   || '';
+    if (!k || !s || !p) return toast('⚠️ أدخل API Key و Secret و Passphrase', true);
+    state.apiKey = k; state.apiSecret = s; state.apiPass = p;
+    localSave();
+    setApiStatus('🔄 جاري التحقق من المفتاح...');
+    const ok = await testApiConnection();
+    if (ok) {
+      state.apiConnected = true;
+      toast('✅ تم الربط بنجاح! جاري المزامنة...', false, true);
+      await syncFromApi();
+      renderScreen();
+    } else {
+      state.apiConnected = false;
+      toast('❌ فشل الاتصال — تحقق من المفتاح والـ Passphrase', true);
+      setApiStatus('🔴 فشل الاتصال — تحقق من البيانات');
+    }
+  });
+
+  document.getElementById('apiSyncBtn')?.addEventListener('click', async () => {
+    if (!state.apiKey) return toast('⚠️ أدخل API Key أولاً', true);
+    await syncFromApi();
+  });
+
+  document.getElementById('apiClearBtn')?.addEventListener('click', () => {
+    state.apiKey = ''; state.apiSecret = ''; state.apiPass = '';
+    state.apiConnected = false;
+    localSave();
+    toast('🗑️ تم حذف مفتاح API');
+    renderScreen();
+  });
 }
 
 function addCoin() {
@@ -1186,4 +1383,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   const age = state.lastSignalUpdate ? Date.now()-state.lastSignalUpdate : Infinity;
   if (age > 5*60*1000 && state.coins.length > 0)
     setTimeout(runAllSignals, 3000);
+
+  // تشغيل المزامنة التلقائية مع OKX API لو المفتاح موجود
+  startApiAutoSync();
+  if (state.apiKey && state.apiSecret && state.apiPass) {
+    setTimeout(syncFromApi, 2000); // مزامنة فورية عند الفتح
+  }
 });
