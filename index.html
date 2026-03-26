@@ -282,23 +282,6 @@ body::before { content: ''; position: fixed; inset: 0; z-index: 1; background-im
 
 .info-box { background: rgba(0,229,184,.04); border: 1px solid rgba(0,229,184,.14); border-radius: var(--r3); padding: 14px 16px; font-size: 12px; color: var(--t2); line-height: 2.1; }
 
-/* ── API Block ─────────────────────────────────── */
-.api-block { background: rgba(99,102,241,.05); border: 1px solid rgba(99,102,241,.22); border-radius: var(--r3); padding: 16px; animation: slideUp .4s ease both; margin-top: 0; }
-.api-block-title { font-size: 13px; font-weight: 800; color: #a78bfa; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
-.api-badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 20px; background: rgba(99,102,241,.12); color: #c4b5fd; }
-.api-desc { font-size: 11.5px; color: var(--t2); line-height: 1.9; margin-bottom: 10px; }
-.api-status-row { font-size: 11px; color: var(--t3); margin-bottom: 4px; min-height: 18px; }
-.api-status-txt { }
-.api-save-btn { flex:1; background: linear-gradient(135deg,#6366f1,#8b5cf6); border: none; border-radius: var(--r2); padding: 11px 16px; font-size: 13px; font-weight: 700; color: #fff; cursor: pointer; font-family: 'Tajawal',sans-serif; touch-action: manipulation; min-height: 44px; transition: opacity .18s; }
-.api-save-btn:active { opacity: .8; }
-.api-sync-btn { flex:1; background: var(--card2); border: 1px solid rgba(99,102,241,.35); border-radius: var(--r2); padding: 11px 14px; font-size: 13px; font-weight: 700; color: #a78bfa; cursor: pointer; font-family: 'Tajawal',sans-serif; touch-action: manipulation; min-height: 44px; transition: background .18s; }
-.api-sync-btn:disabled { opacity: .4; cursor: not-allowed; }
-.api-sync-btn:not(:disabled):active { background: rgba(99,102,241,.12); }
-.api-clear-btn { background: rgba(239,68,68,.08); border: 1px solid rgba(239,68,68,.2); border-radius: var(--r2); padding: 11px 14px; font-size: 13px; font-weight: 700; color: var(--loss); cursor: pointer; font-family: 'Tajawal',sans-serif; touch-action: manipulation; min-height: 44px; transition: background .18s; }
-.api-clear-btn:active { background: rgba(239,68,68,.16); }
-.api-how { margin-top: 12px; background: rgba(0,0,0,.2); border-radius: var(--r2); padding: 10px 12px; font-size: 11px; color: var(--t3); line-height: 2; border: 1px solid var(--edge); }
-.api-how em { color: #a78bfa; font-style: normal; font-weight: 700; }
-
 .modal-overlay { position: fixed; inset: 0; z-index: 500; background: rgba(5,8,15,.88); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); display: flex; align-items: flex-end; justify-content: center; opacity: 0; transition: opacity .22s; pointer-events: none; }
 .modal-overlay.open { opacity: 1; pointer-events: all; }
 .modal-sheet { width: 100%; max-width: 520px; background: var(--card); border: 1px solid var(--edge2); border-radius: 20px 20px 0 0; padding: 0; padding-bottom: calc(24px + var(--safe-bottom)); transform: translateY(100%); transition: transform .3s cubic-bezier(.34,1.1,.64,1); box-shadow: var(--shadow-deep); max-height: 90vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
