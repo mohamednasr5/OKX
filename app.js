@@ -8,7 +8,7 @@
 const OKX_TICKER  = 'https://www.okx.com/api/v5/market/ticker';
 const OKX_CANDLES = 'https://www.okx.com/api/v5/market/candles';
 const OKX_WS_URL  = 'wss://ws.okx.com:8443/ws/v5/public';
-// رابط قاعدة البيانات السحابية (بدون الحاجة لسكريبتات Firebase)
+// رابط قاعدة البيانات السحابية
 const FB_REST_URL = 'https://okx01-3c8d1-default-rtdb.firebaseio.com/my_portfolio.json';
 
 const TICKER_COINS = [
@@ -25,6 +25,7 @@ let state = {
   coins: [],
   usdToEgp: 50,
   alertAt: 10,
+  targetBalance: 0, // هدف المحفظة
   prices: {},
   tickerPrices: {},
   signals: {},
@@ -54,15 +55,16 @@ async function syncFromCloud() {
       const localCoinsStr = JSON.stringify(state.coins);
       
       // إذا كان هناك اختلاف بين السحابة والمحلي، قم بالتحديث
-      if (cloudCoinsStr !== localCoinsStr || data.usdToEgp !== state.usdToEgp || data.alertAt !== state.alertAt) {
+      if (cloudCoinsStr !== localCoinsStr || data.usdToEgp !== state.usdToEgp || data.alertAt !== state.alertAt || (data.targetBalance !== undefined && data.targetBalance !== state.targetBalance)) {
         state.coins = data.coins || [];
         state.usdToEgp = data.usdToEgp || 50;
         state.alertAt = data.alertAt || 10;
+        if (data.targetBalance !== undefined) state.targetBalance = data.targetBalance;
         
         localSave();
         renderScreen();
         syncQP();
-        if (ws && ws.readyState === WebSocket.OPEN) initWebSocket(); // إعادة الاشتراك للعملات الجديدة
+        if (ws && ws.readyState === WebSocket.OPEN) initWebSocket();
       }
       setDbStatus('🟢 متصل (تزامن سحابي)');
     }
@@ -81,6 +83,7 @@ async function saveToCloud() {
         coins: state.coins,
         usdToEgp: state.usdToEgp,
         alertAt: state.alertAt,
+        targetBalance: state.targetBalance,
         updatedAt: Date.now()
       })
     });
@@ -101,6 +104,7 @@ function localSave() {
     localStorage.setItem('okx_coins',   JSON.stringify(state.coins));
     localStorage.setItem('okx_egp',     state.usdToEgp);
     localStorage.setItem('okx_alertAt', state.alertAt);
+    localStorage.setItem('okx_target',  state.targetBalance);
     localStorage.setItem('okx_signals', JSON.stringify(state.signals));
     if (state.lastSignalUpdate) localStorage.setItem('okx_sig_ts', state.lastSignalUpdate);
     
@@ -116,6 +120,7 @@ function load() {
   try { state.signals    = JSON.parse(localStorage.getItem('okx_signals')      || '{}'); } catch(e){}
   state.usdToEgp        = parseFloat(localStorage.getItem('okx_egp')     || '50') || 50;
   state.alertAt         = parseFloat(localStorage.getItem('okx_alertAt') || '10') || 10;
+  state.targetBalance   = parseFloat(localStorage.getItem('okx_target')  || '0')  || 0;
   state.lastSignalUpdate = parseInt(localStorage.getItem('okx_sig_ts')   || '0')  || null;
 }
 
@@ -133,14 +138,12 @@ function setDbStatus(msg) {
 /* ════════════════════════════════════════
    FORMATTING & TOTALS
 ════════════════════════════════════════ */
-const fmt  = (n, d=2) => n==null||isNaN(n) ? '---' : Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+// شلنا التقريب الإجباري وسمحنا بكسور لحد 8 أرقام عشان الرقم يظهر زي ما هو
+const fmt  = (n, d=2) => n==null||isNaN(n) ? '---' : Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:8});
 const fmtP = p => {
   if (!p || isNaN(p)) return '---';
-  if (p >= 10000) return fmt(p, 0);
-  if (p >= 1000)  return fmt(p, 2);
-  if (p >= 1)     return fmt(p, 4);
-  if (p >= 0.01)  return fmt(p, 5);
-  return fmt(p, 8);
+  // إظهار السعر الحقيقي بدون تقريب بأكبر قدر ممكن
+  return Number(p).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:8});
 };
 const sign    = v  => v >= 0 ? '+' : '';
 const pc      = v  => v >= 0 ? 'profit' : 'loss';
@@ -266,14 +269,13 @@ async function fetchTickerPrices() {
 function renderMarketBar() {
   const grid = document.getElementById('marketGrid');
   if (!grid) return;
+  
+  // تنسيق شريط السوق لـ 5 أرقام عشرية بالضبط
   const fmtMP = p => {
     if (!p || isNaN(p)) return '···';
-    if (p >= 10000) return p.toLocaleString('en-US',{maximumFractionDigits:0});
-    if (p >= 1000)  return p.toLocaleString('en-US',{minimumFractionDigits:1,maximumFractionDigits:1});
-    if (p >= 1)     return p.toFixed(3);
-    if (p >= 0.01)  return p.toFixed(4);
-    return p.toFixed(6);
+    return Number(p).toFixed(5);
   };
+  
   grid.innerHTML = TICKER_COINS.map(({sym}) => {
     const d      = state.tickerPrices[sym];
     const price  = d ? fmtMP(d.price) : '···';
@@ -456,14 +458,12 @@ function calcLevels(signal, snap) {
 /* ════════════════════════════════════════
    AI ANALYSIS (LOCAL ALGORITHM FALLBACK)
 ════════════════════════════════════════ */
-// خوارزمية ذكية مدمجة تعمل كبديل مثالي في حال فشل الـ APIs الخارجية (تحل مشكلة خطأ التحليل)
 function generateLocalAI(snap, coin) {
   const qty = parseFloat(coin.quantity)||0, avg = parseFloat(coin.avgBuy)||0;
   const pnlPct = avg && snap.price ? ((snap.price-avg)/avg*100) : null;
   
   let signal = 'NEUTRAL', strength = 'MODERATE';
   
-  // شروط الدخول الاستراتيجية بناءً على المؤشرات الفنية
   if (snap.ema9CrossUp && snap.rsiVal < 65) { 
     signal = 'UP'; 
     strength = snap.rsiVal < 40 ? 'STRONG' : 'MODERATE'; 
@@ -472,7 +472,6 @@ function generateLocalAI(snap, coin) {
     strength = snap.rsiVal > 70 ? 'STRONG' : 'MODERATE'; 
   }
 
-  // توليد نصوص بالعامية المصرية باحترافية
   let rsiAr = snap.rsiVal < 30 ? 'في القاع (تشبع بيعي)، ودي فرصة ارتداد حلوة.' : snap.rsiVal > 70 ? 'في القمة (تشبع شرائي)، وممكن السوق يصحح.' : 'في منطقة محايدة بيجمع سيولة.';
   let trendAr = snap.ema9CrossUp ? 'المتوسطات بتدعم الصعود بقوة دلوقتي.' : 'الاتجاه العام بيميل للهبوط والسيولة ضعيفة.';
   let advice = signal === 'UP' ? 'رأيي: ممكن تعزز كميتك أو تشتري بهدف قريب وحط وقف خسارة.' : signal === 'DOWN' ? 'رأيي: خليك حذر، الأفضل تستنى برة السوق أو تجني ربحك.' : 'رأيي: راقب السوق وماتدخلش تقيل لحد ما الاتجاه يوضح.';
@@ -482,19 +481,16 @@ function generateLocalAI(snap, coin) {
   let reason = `بص يا هندسة، الـ RSI ${rsiAr} و${trendAr} ${posText}${advice}`;
   
   const lvl = calcLevels(signal, snap);
-  // محاكاة نسبة الثقة
   let conf = strength === 'STRONG' ? Math.floor(Math.random() * 12) + 80 : Math.floor(Math.random() * 15) + 60;
   
   return { signal, strength, confidence: conf, reason, ...lvl, fetchedAt: Date.now() };
 }
 
 async function callAI(snap, coin) {
-  // محاولة الاتصال بالـ APIs أولاً (إن وجدت Keys)
-  // وبما أننا في بيئة Client Side، سنلجأ للخوارزمية المحلية المدمجة فوراً لضمان عدم ظهور "خطأ"
   return new Promise(resolve => {
     setTimeout(() => {
       resolve(generateLocalAI(snap, coin));
-    }, 400); // محاكاة وقت المعالجة لتبدو حقيقية
+    }, 400); 
   });
 }
 
@@ -639,6 +635,26 @@ function updateLiveUI() {
 
   const elTotAbsEgp = document.getElementById('tot-abs-egp');
   if (elTotAbsEgp) elTotAbsEgp.textContent = sign(tpnlE) + fmt(Math.abs(tpnlE)) + ' ج.م';
+
+  // تحديث الهدف لحظياً
+  const target = state.targetBalance;
+  if (target > 0) {
+      const rem = target - tv;
+      const isReached = rem <= 0;
+      const prog = Math.min(100, (tv / target) * 100);
+
+      const elRem = document.getElementById('tot-rem');
+      if (elRem) {
+          elRem.textContent = isReached ? '🎉 مبروك! حققت الهدف' : 'متبقي: $' + fmt(rem);
+          elRem.className = isReached ? 'profit' : '';
+      }
+
+      const elProg = document.getElementById('tot-prog');
+      if (elProg) {
+          elProg.style.width = prog + '%';
+          elProg.style.background = isReached ? 'var(--profit)' : 'linear-gradient(90deg, var(--teal), var(--blue))';
+      }
+  }
 }
 
 /* ════════════════════════════════════════
@@ -669,6 +685,26 @@ function renderPortfolio() {
   const tpnl=tv-tc, tpnlE=tpnl*eg, tpct=tc>0?(tpnl/tc*100):0, cls=pc(tpnl);
   const hasExpanded = state.expandedIndex !== null;
 
+  // حساب شريط الهدف
+  const target = state.targetBalance;
+  let targetHtml = '';
+  if (target > 0) {
+      const remaining = target - tv;
+      const isReached = remaining <= 0;
+      const progress = Math.min(100, (tv / target) * 100);
+      targetHtml = `
+      <div style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed rgba(255,255,255,0.08);">
+          <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--t2); margin-bottom: 6px; font-family: 'Tajawal', sans-serif; font-weight: 700;">
+              <span>الهدف: $${fmt(target)}</span>
+              <span id="tot-rem" class="${isReached ? 'profit' : ''}">${isReached ? '🎉 مبروك! حققت الهدف' : 'متبقي: $' + fmt(remaining)}</span>
+          </div>
+          <div style="height: 6px; background: rgba(0,0,0,0.3); border-radius: 3px; overflow: hidden; box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);">
+              <div id="tot-prog" style="height: 100%; width: ${progress}%; background: ${isReached ? 'var(--profit)' : 'linear-gradient(90deg, var(--teal), var(--blue))'}; transition: width 0.4s ease, background 0.4s ease;"></div>
+          </div>
+      </div>
+      `;
+  }
+
   let html = `
     <div class="summary-card">
       <div class="summary-top">
@@ -688,6 +724,7 @@ function renderPortfolio() {
         <div class="stat-box"><div class="stat-label">الربح/الخسارة</div><div class="stat-val ${cls}" id="st-pnl">${sign(tpnl)}$${fmt(Math.abs(tpnl))}</div><div class="sum-stat-sub ${cls}" id="st-pnle">${sign(tpnlE)}${fmt(Math.abs(tpnlE))} ج.م</div></div>
         <div class="stat-box"><div class="stat-label">العملات</div><div class="stat-val">${state.coins.length}</div><div class="stat-sub">مباشر ⚡</div></div>
       </div>
+      ${targetHtml}
     </div>
     <div class="section-title">عملاتي <span class="section-badge">${state.coins.length}</span></div>
     
@@ -1013,8 +1050,11 @@ function initQuickPanel() {
   syncLabels();
   const ei = document.getElementById('qpEgpInp');
   const ai = document.getElementById('qpAlertInp');
+  const ti = document.getElementById('qpTargetInp');
+
   if (ei) ei.value = state.usdToEgp;
   if (ai) ai.value = state.alertAt;
+  if (ti) ti.value = state.targetBalance;
 
   const toggle  = document.getElementById('qpToggle');
   const body    = document.getElementById('qpBody');
@@ -1029,8 +1069,12 @@ function initQuickPanel() {
   document.getElementById('qpSaveBtn')?.addEventListener('click', () => {
     const egp = parseFloat(ei?.value || 50);
     const al  = parseFloat(ai?.value || 10);
+    const tg  = parseFloat(ti?.value || 0);
+
     if (!isNaN(egp) && egp > 0) state.usdToEgp = egp;
     if (!isNaN(al)  && al  > 0) { state.alertAt = al; state.alertFired = {}; }
+    if (!isNaN(tg)  && tg >= 0) state.targetBalance = tg;
+
     save(); syncLabels();
     body.classList.remove('open');
     chevron?.classList.remove('open');
@@ -1130,7 +1174,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   renderScreen();
   renderMarketBar();
 
-  // 2. تفعيل المزامنة السحابية بدلاً من Firebase SDK
+  // 2. تفعيل المزامنة السحابية
   await syncFromCloud(); 
 
   // 3. جلب الأسعار والبدء
