@@ -25,7 +25,7 @@ let state = {
   coins: [],
   usdToEgp: 50,
   alertAt: 10,
-  targetBalance: 0, // هدف المحفظة
+  targetBalance: 0,
   prices: {},
   tickerPrices: {},
   signals: {},
@@ -54,7 +54,6 @@ async function syncFromCloud() {
       const cloudCoinsStr = JSON.stringify(data.coins || []);
       const localCoinsStr = JSON.stringify(state.coins);
       
-      // إذا كان هناك اختلاف بين السحابة والمحلي، قم بالتحديث
       if (cloudCoinsStr !== localCoinsStr || data.usdToEgp !== state.usdToEgp || data.alertAt !== state.alertAt || (data.targetBalance !== undefined && data.targetBalance !== state.targetBalance)) {
         state.coins = data.coins || [];
         state.usdToEgp = data.usdToEgp || 50;
@@ -96,7 +95,7 @@ async function saveToCloud() {
 
 function save() {
   localSave();
-  saveToCloud(); // رفع البيانات فوراً عند أي تعديل
+  saveToCloud();
 }
 
 function localSave() {
@@ -108,7 +107,6 @@ function localSave() {
     localStorage.setItem('okx_signals', JSON.stringify(state.signals));
     if (state.lastSignalUpdate) localStorage.setItem('okx_sig_ts', state.lastSignalUpdate);
     
-    // حفظ للإضافة (Background script)
     if (typeof chrome !== 'undefined' && chrome.storage) {
       chrome.storage.local.set({ state_coins: state.coins });
     }
@@ -136,15 +134,20 @@ function setDbStatus(msg) {
 }
 
 /* ════════════════════════════════════════
-   FORMATTING & TOTALS
+   FORMATTING & TOTALS (التعديلات الجديدة)
 ════════════════════════════════════════ */
-// شلنا التقريب الإجباري وسمحنا بكسور لحد 8 أرقام عشان الرقم يظهر زي ما هو
-const fmt  = (n, d=2) => n==null||isNaN(n) ? '---' : Number(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:8});
-const fmtP = p => {
-  if (!p || isNaN(p)) return '---';
-  // إظهار السعر الحقيقي بدون تقريب بأكبر قدر ممكن
-  return Number(p).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:8});
+// 1. التقريب للنسب المئوية وإجمالي المحفظة (رقمين عشريين فقط)
+const fmtRound = (n, d=2) => {
+  if (n == null || isNaN(n)) return '---';
+  return Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
 };
+
+// 2. بدون تقريب، مع مسح الأصفار الزائدة (للأسعار، الكميات، التفاصيل)
+const fmtExact = (n) => {
+  if (n == null || isNaN(n)) return '---';
+  return Number(n).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 8 });
+};
+
 const sign    = v  => v >= 0 ? '+' : '';
 const pc      = v  => v >= 0 ? 'profit' : 'loss';
 const timeAgo = ts => {
@@ -174,7 +177,7 @@ function updateBrowserTitle(tpnl) {
     if (typeof chrome !== 'undefined' && chrome.action) chrome.action.setBadgeText({ text: '' });
   } else {
     const signStr = tpnl >= 0 ? '+' : '-';
-    document.title = `${signStr}$${fmt(Math.abs(tpnl))} | OKX Tracker`;
+    document.title = `${signStr}$${fmtRound(Math.abs(tpnl))} | OKX Tracker`;
     
     if (typeof chrome !== 'undefined' && chrome.action) {
         let text = Math.abs(tpnl).toFixed(0);
@@ -186,7 +189,7 @@ function updateBrowserTitle(tpnl) {
 }
 
 /* ════════════════════════════════════════
-   WEBSOCKETS (REAL-TIME INSTANT PRICES)
+   WEBSOCKETS
 ════════════════════════════════════════ */
 function initWebSocket() {
   if (ws) ws.close();
@@ -270,7 +273,7 @@ function renderMarketBar() {
   const grid = document.getElementById('marketGrid');
   if (!grid) return;
   
-  // تنسيق شريط السوق لـ 5 أرقام عشرية بالضبط
+  // تنسيق شريط السوق لـ 5 أرقام عشرية بالظبط
   const fmtMP = p => {
     if (!p || isNaN(p)) return '···';
     return Number(p).toFixed(5);
@@ -280,7 +283,7 @@ function renderMarketBar() {
     const d      = state.tickerPrices[sym];
     const price  = d ? fmtMP(d.price) : '···';
     const ch     = d?.change ?? null;
-    const chTxt  = ch !== null ? `${ch >= 0 ? '▲' : '▼'}${Math.abs(ch).toFixed(2)}%` : '';
+    const chTxt  = ch !== null ? `${ch >= 0 ? '▲' : '▼'}${fmtRound(Math.abs(ch), 2)}%` : '';
     const chCls  = ch === null ? 'nc' : ch > 0.005 ? 'up' : ch < -0.005 ? 'dn' : 'nc';
     const prCls  = ch === null ? 'nc' : ch > 0.005 ? 'profit' : ch < -0.005 ? 'loss' : 'nc';
     const flash  = d?.prev ? (d.price > d.prev ? ' up-flash' : d.price < d.prev ? ' dn-flash' : '') : '';
@@ -357,7 +360,7 @@ function checkProfitAlert(totalPnl) {
   const key = 'lv' + level;
   if (state.alertFired[key]) return;
   state.alertFired[key] = true;
-  const earned    = (level * thr).toFixed(0);
+  const earned    = fmtRound(level * thr, 0);
   const earnedEGP = Math.round(level * thr * state.usdToEgp).toLocaleString('ar-EG');
   playProfitSound();
   toast(`🎉 مبروك! ربحت $${earned} — ${earnedEGP} جنيه!`, false, true);
@@ -591,50 +594,64 @@ function updateLiveUI() {
     }
 
     const elPr = document.getElementById(`c-pr-${c.symbol}`);
-    if (elPr) { elPr.textContent = price !== null ? '$' + fmtP(price) : '---'; elPr.className = `coin-price ${cl}`; }
+    if (elPr) { elPr.textContent = price !== null ? '$' + fmtExact(price) : '---'; elPr.className = `coin-price ${cl}`; }
 
     const elPre = document.getElementById(`c-pre-${c.symbol}`);
-    if (elPre) elPre.textContent = price !== null ? fmt(price * eg, 2) + ' ج.م' : '---';
+    if (elPre) elPre.textContent = price !== null ? fmtExact(price * eg) + ' ج.م' : '---';
 
     const elVal = document.getElementById(`c-val-${c.symbol}`);
-    if (elVal) elVal.textContent = val !== null ? '$' + fmt(val) : '---';
+    if (elVal) elVal.textContent = val !== null ? '$' + fmtExact(val) : '---';
 
     const elPnl = document.getElementById(`c-pnl-${c.symbol}`);
-    if (elPnl) { elPnl.textContent = pnl !== null ? sign(pnl) + '$' + fmt(Math.abs(pnl)) : '---'; elPnl.className = `pnl-usd ${cl}`; }
+    if (elPnl) { elPnl.textContent = pnl !== null ? sign(pnl) + '$' + fmtExact(Math.abs(pnl)) : '---'; elPnl.className = `pnl-usd ${cl}`; }
 
     const elPnle = document.getElementById(`c-pnle-${c.symbol}`);
-    if (elPnle) elPnle.textContent = pnl !== null ? sign(pnl * eg) + fmt(Math.abs(pnl * eg)) + ' ج.م' : '---';
+    if (elPnle) elPnle.textContent = pnl !== null ? sign(pnl * eg) + fmtExact(Math.abs(pnl * eg)) + ' ج.م' : '---';
 
     const elPct = document.getElementById(`c-pct-${c.symbol}`);
-    if (elPct) { elPct.textContent = pnlPct !== null ? sign(pnlPct) + fmt(Math.abs(pnlPct), 2) + '%' : '---'; elPct.className = `pnl-pct-badge ${ip === null ? 'neutral' : cl}`; }
+    if (elPct) { elPct.textContent = pnlPct !== null ? sign(pnlPct) + fmtRound(Math.abs(pnlPct)) + '%' : '---'; elPct.className = `pnl-pct-badge ${ip === null ? 'neutral' : cl}`; }
 
     const elChg = document.getElementById(`c-chg-${c.symbol}`);
-    if (elChg && ch24 !== null) { elChg.textContent = sign(ch24) + fmt(Math.abs(ch24), 2) + '%'; elChg.className = `coin-change ${pc(ch24)}`; }
+    if (elChg && ch24 !== null) { elChg.textContent = sign(ch24) + fmtRound(Math.abs(ch24)) + '%'; elChg.className = `coin-change ${pc(ch24)}`; }
 
     const elHi = document.getElementById(`c-hi-${c.symbol}`);
-    if (elHi && t?.high24h) elHi.textContent = '$' + fmtP(t.high24h);
+    if (elHi && t?.high24h) elHi.textContent = '$' + fmtExact(t.high24h);
     const elLo = document.getElementById(`c-lo-${c.symbol}`);
-    if (elLo && t?.low24h) elLo.textContent = '$' + fmtP(t.low24h);
+    if (elLo && t?.low24h) elLo.textContent = '$' + fmtExact(t.low24h);
     const elVol = document.getElementById(`c-vol-${c.symbol}`);
-    if (elVol && t?.vol24h) elVol.textContent = fmt(t.vol24h, 0);
+    if (elVol && t?.vol24h) elVol.textContent = fmtExact(t.vol24h);
   });
 
   const tpnl = tv - tc, tpnlE = tpnl * eg, tpct = tc > 0 ? (tpnl / tc * 100) : 0, cls = pc(tpnl);
 
+  // تحديث القيم المجمعة بالتقريب للرقمين العشريين
   const elTotVal = document.getElementById('tot-val');
-  if (elTotVal) { elTotVal.textContent = '$' + fmt(tv); elTotVal.className = `total-value ${cls}`; }
+  if (elTotVal) { elTotVal.textContent = '$' + fmtRound(tv); elTotVal.className = `total-value ${cls}`; }
 
   const elTotEgp = document.getElementById('tot-egp');
-  if (elTotEgp) elTotEgp.textContent = fmt(tv * eg) + ' ج.م';
+  if (elTotEgp) elTotEgp.textContent = fmtRound(tv * eg) + ' ج.م';
 
   const elTotPct = document.getElementById('tot-pct');
-  if (elTotPct) { elTotPct.textContent = sign(tpct) + fmt(tpct, 2) + '%'; elTotPct.className = `pnl-pct-big ${cls}`; }
+  if (elTotPct) { elTotPct.textContent = sign(tpct) + fmtRound(Math.abs(tpct)) + '%'; elTotPct.className = `pnl-pct-big ${cls}`; }
 
   const elTotAbs = document.getElementById('tot-abs');
-  if (elTotAbs) { elTotAbs.textContent = sign(tpnl) + '$' + fmt(Math.abs(tpnl)); elTotAbs.className = `pnl-abs ${cls}`; }
+  if (elTotAbs) { elTotAbs.textContent = sign(tpnl) + '$' + fmtRound(Math.abs(tpnl)); elTotAbs.className = `pnl-abs ${cls}`; }
 
   const elTotAbsEgp = document.getElementById('tot-abs-egp');
-  if (elTotAbsEgp) elTotAbsEgp.textContent = sign(tpnlE) + fmt(Math.abs(tpnlE)) + ' ج.م';
+  if (elTotAbsEgp) elTotAbsEgp.textContent = sign(tpnlE) + fmtRound(Math.abs(tpnlE)) + ' ج.م';
+
+  // تصحيح الصناديق في الـ Summary اللي كانت أرقامها بتعلق
+  const elStTc = document.getElementById('st-tc');
+  if (elStTc) elStTc.textContent = '$' + fmtRound(tc);
+
+  const elStTce = document.getElementById('st-tce');
+  if (elStTce) elStTce.textContent = fmtRound(tc * eg) + ' ج.م';
+
+  const elStPnl = document.getElementById('st-pnl');
+  if (elStPnl) { elStPnl.textContent = sign(tpnl) + '$' + fmtRound(Math.abs(tpnl)); elStPnl.className = `stat-val ${cls}`; }
+
+  const elStPnle = document.getElementById('st-pnle');
+  if (elStPnle) { elStPnle.textContent = sign(tpnlE) + fmtRound(Math.abs(tpnlE)) + ' ج.م'; elStPnle.className = `stat-sub ${cls}`; }
 
   // تحديث الهدف لحظياً
   const target = state.targetBalance;
@@ -645,7 +662,7 @@ function updateLiveUI() {
 
       const elRem = document.getElementById('tot-rem');
       if (elRem) {
-          elRem.textContent = isReached ? '🎉 مبروك! حققت الهدف' : 'متبقي: $' + fmt(rem);
+          elRem.textContent = isReached ? '🎉 مبروك! حققت الهدف' : 'متبقي: $' + fmtRound(rem);
           elRem.className = isReached ? 'profit' : '';
       }
 
@@ -695,8 +712,8 @@ function renderPortfolio() {
       targetHtml = `
       <div style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed rgba(255,255,255,0.08);">
           <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--t2); margin-bottom: 6px; font-family: 'Tajawal', sans-serif; font-weight: 700;">
-              <span>الهدف: $${fmt(target)}</span>
-              <span id="tot-rem" class="${isReached ? 'profit' : ''}">${isReached ? '🎉 مبروك! حققت الهدف' : 'متبقي: $' + fmt(remaining)}</span>
+              <span>الهدف: $${fmtRound(target)}</span>
+              <span id="tot-rem" class="${isReached ? 'profit' : ''}">${isReached ? '🎉 مبروك! حققت الهدف' : 'متبقي: $' + fmtRound(remaining)}</span>
           </div>
           <div style="height: 6px; background: rgba(0,0,0,0.3); border-radius: 3px; overflow: hidden; box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);">
               <div id="tot-prog" style="height: 100%; width: ${progress}%; background: ${isReached ? 'var(--profit)' : 'linear-gradient(90deg, var(--teal), var(--blue))'}; transition: width 0.4s ease, background 0.4s ease;"></div>
@@ -710,18 +727,18 @@ function renderPortfolio() {
       <div class="summary-top">
         <div>
           <div class="summary-label">إجمالي المحفظة</div>
-          <div class="total-value ${cls}" id="tot-val">$${fmt(tv)}</div>
-          <div class="total-egp" id="tot-egp">${fmt(tv*eg)} ج.م</div>
+          <div class="total-value ${cls}" id="tot-val">$${fmtRound(tv)}</div>
+          <div class="total-egp" id="tot-egp">${fmtRound(tv*eg)} ج.م</div>
         </div>
         <div class="pnl-badge">
-          <div class="pnl-pct-big ${cls}" id="tot-pct">${sign(tpct)}${fmt(tpct,2)}%</div>
-          <div class="pnl-abs ${cls}" id="tot-abs">${sign(tpnl)}$${fmt(Math.abs(tpnl))}</div>
-          <div class="pnl-abs" id="tot-abs-egp">${sign(tpnlE)}${fmt(Math.abs(tpnlE))} ج.م</div>
+          <div class="pnl-pct-big ${cls}" id="tot-pct">${sign(tpct)}${fmtRound(Math.abs(tpct))}%</div>
+          <div class="pnl-abs ${cls}" id="tot-abs">${sign(tpnl)}$${fmtRound(Math.abs(tpnl))}</div>
+          <div class="pnl-abs" id="tot-abs-egp">${sign(tpnlE)}${fmtRound(Math.abs(tpnlE))} ج.م</div>
         </div>
       </div>
       <div class="summary-stats">
-        <div class="stat-box"><div class="stat-label">التكلفة</div><div class="stat-val">$${fmt(tc,0)}</div><div class="stat-sub">${fmt(tc*eg,0)} ج.م</div></div>
-        <div class="stat-box"><div class="stat-label">الربح/الخسارة</div><div class="stat-val ${cls}" id="st-pnl">${sign(tpnl)}$${fmt(Math.abs(tpnl))}</div><div class="sum-stat-sub ${cls}" id="st-pnle">${sign(tpnlE)}${fmt(Math.abs(tpnlE))} ج.م</div></div>
+        <div class="stat-box"><div class="stat-label">التكلفة</div><div class="stat-val" id="st-tc">$${fmtRound(tc)}</div><div class="stat-sub" id="st-tce">${fmtRound(tc*eg)} ج.م</div></div>
+        <div class="stat-box"><div class="stat-label">الربح/الخسارة</div><div class="stat-val ${cls}" id="st-pnl">${sign(tpnl)}$${fmtRound(Math.abs(tpnl))}</div><div class="stat-sub ${cls}" id="st-pnle">${sign(tpnlE)}${fmtRound(Math.abs(tpnlE))} ج.م</div></div>
         <div class="stat-box"><div class="stat-label">العملات</div><div class="stat-val">${state.coins.length}</div><div class="stat-sub">مباشر ⚡</div></div>
       </div>
       ${targetHtml}
@@ -736,9 +753,9 @@ function renderPortfolio() {
     const isExpanded = state.expandedIndex === i;
     const expClass = isExpanded ? 'expanded' : '';
     
-    const high = tickerObj?.high24h !== undefined ? fmtP(tickerObj.high24h) : '---';
-    const low  = tickerObj?.low24h !== undefined ? fmtP(tickerObj.low24h) : '---';
-    const vol  = tickerObj?.vol24h !== undefined ? fmt(tickerObj.vol24h, 0) : '---';
+    const high = tickerObj?.high24h !== undefined ? fmtExact(tickerObj.high24h) : '---';
+    const low  = tickerObj?.low24h !== undefined ? fmtExact(tickerObj.low24h) : '---';
+    const vol  = tickerObj?.vol24h !== undefined ? fmtExact(tickerObj.vol24h) : '---';
 
     html += `
     <div class="coin-card ${cl} ${expClass}" data-index="${i}" id="c-card-${c.symbol}">
@@ -749,27 +766,27 @@ function renderPortfolio() {
           <div>
             <div class="coin-name">${c.symbol.toUpperCase()}</div>
             <div class="coin-pair">/ USDT</div>
-            ${ch24!==null?`<span class="coin-change ${pc(ch24)}" id="c-chg-${c.symbol}">${sign(ch24)}${fmt(Math.abs(ch24),2)}%</span>`:''}
+            ${ch24!==null?`<span class="coin-change ${pc(ch24)}" id="c-chg-${c.symbol}">${sign(ch24)}${fmtRound(Math.abs(ch24))}%</span>`:''}
           </div>
         </div>
         <div class="coin-right">
-          <div class="coin-price ${cl}" id="c-pr-${c.symbol}">$${price!==null?fmtP(price):'---'}</div>
-          <div class="coin-price-egp" id="c-pre-${c.symbol}">${price!==null?fmt(price*eg,2)+' ج.م':'---'}</div>
+          <div class="coin-price ${cl}" id="c-pr-${c.symbol}">$${price!==null?fmtExact(price):'---'}</div>
+          <div class="coin-price-egp" id="c-pre-${c.symbol}">${price!==null?fmtExact(price*eg)+' ج.م':'---'}</div>
           ${sig&&!sig.error?`<div class="coin-ai-signal" style="color:${sig.signal==='UP'?'var(--profit)':sig.signal==='DOWN'?'var(--loss)':'var(--gold)'}">${sig.signal==='UP'?'🟢 صاعد':sig.signal==='DOWN'?'🔴 هابط':'🟡 محايد'}</div>`:''}
         </div>
       </div>
       <div class="coin-stats">
-        <div><div class="coin-stat-label">الكمية</div><div class="coin-stat-val">${fmt(qty,4)}</div></div>
-        <div><div class="coin-stat-label">متوسط الشراء</div><div class="coin-stat-val">$${fmtP(avg)}</div></div>
-        <div><div class="coin-stat-label">القيمة</div><div class="coin-stat-val" id="c-val-${c.symbol}">${val!==null?'$'+fmt(val):'---'}</div></div>
+        <div><div class="coin-stat-label">الكمية</div><div class="coin-stat-val">${fmtExact(qty)}</div></div>
+        <div><div class="coin-stat-label">متوسط الشراء</div><div class="coin-stat-val">$${fmtExact(avg)}</div></div>
+        <div><div class="coin-stat-label">القيمة</div><div class="coin-stat-val" id="c-val-${c.symbol}">${val!==null?'$'+fmtExact(val):'---'}</div></div>
       </div>
       <div class="coin-pnl-row">
         <div>
-          <div class="pnl-usd ${cl}" id="c-pnl-${c.symbol}">${pnl!==null?sign(pnl)+'$'+fmt(Math.abs(pnl)):'---'}</div>
-          <div class="pnl-egp-sub" id="c-pnle-${c.symbol}">${pnlE!==null?sign(pnlE)+fmt(Math.abs(pnlE))+' ج.م':'---'}</div>
+          <div class="pnl-usd ${cl}" id="c-pnl-${c.symbol}">${pnl!==null?sign(pnl)+'$'+fmtExact(Math.abs(pnl)):'---'}</div>
+          <div class="pnl-egp-sub" id="c-pnle-${c.symbol}">${pnlE!==null?sign(pnlE)+fmtExact(Math.abs(pnlE))+' ج.م':'---'}</div>
         </div>
         <div class="pnl-actions">
-          <div class="pnl-pct-badge ${ip===null?'neutral':cl}" id="c-pct-${c.symbol}">${pnlPct!==null?sign(pnlPct)+fmt(Math.abs(pnlPct),2)+'%':'---'}</div>
+          <div class="pnl-pct-badge ${ip===null?'neutral':cl}" id="c-pct-${c.symbol}">${pnlPct!==null?sign(pnlPct)+fmtRound(Math.abs(pnlPct))+'%':'---'}</div>
           <div class="expand-chevron ${isExpanded ? 'open' : ''}">▼</div>
         </div>
       </div>
@@ -834,9 +851,9 @@ function renderSignals() {
           </div>
           <div class="sig-reason">${s.reason||''}</div>
           ${s.entry?`<div class="sig-levels">
-            <div class="sig-lv"><div class="sig-lv-label">دخول</div><div class="sig-lv-val neutral">$${fmtP(s.entry)}</div></div>
-            <div class="sig-lv"><div class="sig-lv-label">هدف</div><div class="sig-lv-val profit">$${fmtP(s.target)}</div></div>
-            <div class="sig-lv"><div class="sig-lv-label">وقف</div><div class="sig-lv-val loss">$${fmtP(s.stopLoss)}</div></div>
+            <div class="sig-lv"><div class="sig-lv-label">دخول</div><div class="sig-lv-val neutral">$${fmtExact(s.entry)}</div></div>
+            <div class="sig-lv"><div class="sig-lv-label">هدف</div><div class="sig-lv-val profit">$${fmtExact(s.target)}</div></div>
+            <div class="sig-lv"><div class="sig-lv-label">وقف</div><div class="sig-lv-val loss">$${fmtExact(s.stopLoss)}</div></div>
             <div class="sig-lv"><div class="sig-lv-label">إطار</div><div class="sig-lv-val neutral">5-15د</div></div>
           </div>`:''}
         </div>`;
@@ -1033,7 +1050,7 @@ function initQuickPanel() {
     if (pill && pnlVal && tpnl !== 0) {
       pill.style.display = 'flex';
       if (sep) sep.style.display = '';
-      pnlVal.textContent = (tpnl >= 0 ? '+' : '') + '$' + Math.abs(tpnl).toFixed(2);
+      pnlVal.textContent = (tpnl >= 0 ? '+' : '') + '$' + fmtRound(Math.abs(tpnl));
       pnlVal.className   = 'qp-val ' + (tpnl >= 0 ? 'profit' : 'loss');
       if (pnlLbl) pnlLbl.textContent = tpnl >= 0 ? 'ربح' : 'خسارة';
     } else if (pill) {
@@ -1128,10 +1145,9 @@ function initModal() {
 }
 
 /* ════════════════════════════════════════
-   AUTO REFRESH (AI, Countdowns & SYNC)
+   AUTO REFRESH
 ════════════════════════════════════════ */
 function startAutoRefresh() {
-  // مزامنة سحابية كل 15 ثانية لجلب أي تغييرات تمت في جهاز آخر (متصفح أخر أو إضافة)
   setInterval(syncFromCloud, 15000);
 
   setInterval(() => {
@@ -1152,8 +1168,8 @@ function initRefreshBtn() {
     const btn = document.getElementById('refreshBtn');
     btn.innerHTML = '<span class="spin">🔄</span>';
     
-    await syncFromCloud(); // جلب آخر البيانات من السحابة
-    initWebSocket(); // إعادة تشغيل الـ WS
+    await syncFromCloud(); 
+    initWebSocket(); 
     await refreshPrices();
     await fetchTickerPrices();
     
@@ -1166,7 +1182,7 @@ function initRefreshBtn() {
    BOOT
 ════════════════════════════════════════ */
 window.addEventListener('DOMContentLoaded', async () => {
-  load(); // 1. تحميل الإعدادات المحلية فوراً
+  load(); 
   initTabs();
   initModal();
   initQuickPanel();
@@ -1174,10 +1190,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   renderScreen();
   renderMarketBar();
 
-  // 2. تفعيل المزامنة السحابية
   await syncFromCloud(); 
 
-  // 3. جلب الأسعار والبدء
   await refreshPrices();
   await fetchTickerPrices();
   renderScreen();
@@ -1186,7 +1200,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   initWebSocket();
   startAutoRefresh();
 
-  // تفعيل زر إغلاق اللوحة الجانبية (إن وجد)
   document.getElementById('closePanelBtn')?.addEventListener('click', () => {
     if (typeof window !== 'undefined') window.close();
   });
