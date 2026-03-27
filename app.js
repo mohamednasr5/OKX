@@ -136,13 +136,13 @@ function setDbStatus(msg) {
 /* ════════════════════════════════════════
    FORMATTING & TOTALS (التعديلات الجديدة)
 ════════════════════════════════════════ */
-// 1. التقريب للنسب المئوية وإجمالي المحفظة (رقمين عشريين فقط)
+// 1. التقريب للنسب المئوية، إجمالي المحفظة، وأرباح العملة الفردية
 const fmtRound = (n, d=2) => {
   if (n == null || isNaN(n)) return '---';
   return Number(n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
 };
 
-// 2. بدون تقريب، مع مسح الأصفار الزائدة (للأسعار، الكميات، التفاصيل)
+// 2. بدون تقريب، مع مسح الأصفار الزائدة (للأسعار، الكميات، القيمة الإجمالية للعملة)
 const fmtExact = (n) => {
   if (n == null || isNaN(n)) return '---';
   return Number(n).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 8 });
@@ -273,10 +273,10 @@ function renderMarketBar() {
   const grid = document.getElementById('marketGrid');
   if (!grid) return;
   
-  // تنسيق شريط السوق لـ 5 أرقام عشرية بالظبط
+  // يعرض لحد 5 أرقام، لكن لو آخرها أصفار ملهاش لازمة بيشيلها
   const fmtMP = p => {
     if (!p || isNaN(p)) return '···';
-    return Number(p).toFixed(5);
+    return Number(p).toLocaleString('en-US', { maximumFractionDigits: 5 });
   };
   
   grid.innerHTML = TICKER_COINS.map(({sym}) => {
@@ -602,11 +602,12 @@ function updateLiveUI() {
     const elVal = document.getElementById(`c-val-${c.symbol}`);
     if (elVal) elVal.textContent = val !== null ? '$' + fmtExact(val) : '---';
 
+    // التقريب لأرباح العملة الفردية
     const elPnl = document.getElementById(`c-pnl-${c.symbol}`);
-    if (elPnl) { elPnl.textContent = pnl !== null ? sign(pnl) + '$' + fmtExact(Math.abs(pnl)) : '---'; elPnl.className = `pnl-usd ${cl}`; }
+    if (elPnl) { elPnl.textContent = pnl !== null ? sign(pnl) + '$' + fmtRound(Math.abs(pnl)) : '---'; elPnl.className = `pnl-usd ${cl}`; }
 
     const elPnle = document.getElementById(`c-pnle-${c.symbol}`);
-    if (elPnle) elPnle.textContent = pnl !== null ? sign(pnl * eg) + fmtExact(Math.abs(pnl * eg)) + ' ج.م' : '---';
+    if (elPnle) elPnle.textContent = pnl !== null ? sign(pnl * eg) + fmtRound(Math.abs(pnl * eg)) + ' ج.م' : '---';
 
     const elPct = document.getElementById(`c-pct-${c.symbol}`);
     if (elPct) { elPct.textContent = pnlPct !== null ? sign(pnlPct) + fmtRound(Math.abs(pnlPct)) + '%' : '---'; elPct.className = `pnl-pct-badge ${ip === null ? 'neutral' : cl}`; }
@@ -624,7 +625,6 @@ function updateLiveUI() {
 
   const tpnl = tv - tc, tpnlE = tpnl * eg, tpct = tc > 0 ? (tpnl / tc * 100) : 0, cls = pc(tpnl);
 
-  // تحديث القيم المجمعة بالتقريب للرقمين العشريين
   const elTotVal = document.getElementById('tot-val');
   if (elTotVal) { elTotVal.textContent = '$' + fmtRound(tv); elTotVal.className = `total-value ${cls}`; }
 
@@ -640,7 +640,6 @@ function updateLiveUI() {
   const elTotAbsEgp = document.getElementById('tot-abs-egp');
   if (elTotAbsEgp) elTotAbsEgp.textContent = sign(tpnlE) + fmtRound(Math.abs(tpnlE)) + ' ج.م';
 
-  // تصحيح الصناديق في الـ Summary اللي كانت أرقامها بتعلق
   const elStTc = document.getElementById('st-tc');
   if (elStTc) elStTc.textContent = '$' + fmtRound(tc);
 
@@ -782,8 +781,8 @@ function renderPortfolio() {
       </div>
       <div class="coin-pnl-row">
         <div>
-          <div class="pnl-usd ${cl}" id="c-pnl-${c.symbol}">${pnl!==null?sign(pnl)+'$'+fmtExact(Math.abs(pnl)):'---'}</div>
-          <div class="pnl-egp-sub" id="c-pnle-${c.symbol}">${pnlE!==null?sign(pnlE)+fmtExact(Math.abs(pnlE))+' ج.م':'---'}</div>
+          <div class="pnl-usd ${cl}" id="c-pnl-${c.symbol}">${pnl!==null?sign(pnl)+'$'+fmtRound(Math.abs(pnl)):'---'}</div>
+          <div class="pnl-egp-sub" id="c-pnle-${c.symbol}">${pnlE!==null?sign(pnlE)+fmtRound(Math.abs(pnlE))+' ج.م':'---'}</div>
         </div>
         <div class="pnl-actions">
           <div class="pnl-pct-badge ${ip===null?'neutral':cl}" id="c-pct-${c.symbol}">${pnlPct!==null?sign(pnlPct)+fmtRound(Math.abs(pnlPct))+'%':'---'}</div>
