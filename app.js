@@ -101,11 +101,93 @@ async function idbGet(key) {
 }
 
 /* ════════════════════════════════════════
-   STORAGE — محلي بالكامل (localStorage + IndexedDB)
+   STORAGE — محلي بالكامل (chrome.storage + localStorage + IndexedDB)
 ════════════════════════════════════════ */
+
+// هل التطبيق شغال كـ Chrome Extension؟
+const IS_EXT = typeof chrome !== 'undefined' && !!chrome?.storage?.local;
+
+/* ════════════════════════════════════════
+   API FETCH — يمر عبر background في الإضافة (يحل CORS)
+   وفي PWA يتصل مباشرة
+════════════════════════════════════════ */
+async function apiFetch(type, params) {
+  if (IS_EXT) {
+    // الإضافة: أرسل للـ background proxy
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage({ type, ...params }, response => {
+        if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+        if (response?.ok) resolve(response.data ?? response.results);
+        else reject(new Error(response?.error || 'API error'));
+      });
+    });
+  } else {
+    // PWA: اتصال مباشر
+    const OKX_T = 'https://www.okx.com/api/v5/market/ticker';
+    const OKX_C = 'https://www.okx.com/api/v5/market/candles';
+    if (type === 'FETCH_TICKER') {
+      const r = await fetch(`${OKX_T}?instId=${params.instId}`);
+      return r.json();
+    }
+    if (type === 'FETCH_TICKERS_BATCH') {
+      return Promise.all(params.instIds.map(id =>
+        fetch(`${OKX_T}?instId=${id}`).then(r => r.json()).catch(() => null)
+      ));
+    }
+    if (type === 'FETCH_CANDLES') {
+      const r = await fetch(`${OKX_C}?instId=${params.instId}&bar=5m&limit=60`);
+      return r.json();
+    }
+  }
+}
+
+
 function save() {
   localSave();
-  idbSave(); // نسخة احتياطية في IndexedDB
+  idbSave();
+  if (IS_EXT) chromeStorageSave();
+}
+
+// chrome.storage.local — الأقوى في بيئة الإضافة (لا يتأثر بـ Clear Site Data)
+function chromeStorageSave() {
+  try {
+    chrome.storage.local.set({
+      okx_state: {
+        coins:            state.coins,
+        usdToEgp:         state.usdToEgp,
+        alertAt:          state.alertAt,
+        targetBalance:    state.targetBalance,
+        signals:          state.signals,
+        lastSignalUpdate: state.lastSignalUpdate,
+        savedAt:          Date.now(),
+      }
+    });
+  } catch(e) {}
+}
+
+function chromeStorageLoad() {
+  return new Promise(resolve => {
+    if (!IS_EXT) return resolve(false);
+    try {
+      chrome.storage.local.get('okx_state', result => {
+        const saved = result?.okx_state;
+        if (!saved || !saved.coins?.length) return resolve(false);
+        const hadCoins = Array.isArray(state.coins) && state.coins.length > 0;
+        if (!hadCoins) {
+          state.coins            = saved.coins;
+          state.usdToEgp         = saved.usdToEgp         ?? state.usdToEgp;
+          state.alertAt          = saved.alertAt           ?? state.alertAt;
+          state.targetBalance    = saved.targetBalance     ?? state.targetBalance;
+          state.signals          = saved.signals           ?? {};
+          state.lastSignalUpdate = saved.lastSignalUpdate  ?? null;
+          localSave();
+          resolve(true);
+        } else {
+          resolve(false);
+        }
+      });
+    } catch(e) { resolve(false); }
+  });
 }
 
 function localSave() {
@@ -117,9 +199,6 @@ function localSave() {
     localStorage.setItem(LS_KEYS.SIGNALS,  JSON.stringify(state.signals));
     if (state.lastSignalUpdate) {
       localStorage.setItem(LS_KEYS.SIG_TS, String(state.lastSignalUpdate));
-    }
-    if (typeof chrome !== 'undefined' && chrome.storage) {
-      chrome.storage.local.set({ state_coins: state.coins });
     }
   } catch(e) {
     console.warn('localStorage write failed:', e);
@@ -141,7 +220,7 @@ async function idbSave() {
 }
 
 function load() {
-  // أولاً: حاول تحميل من localStorage
+  // تحميل من localStorage
   try { state.coins      = JSON.parse(localStorage.getItem(LS_KEYS.COINS)    || '[]'); } catch(e){ state.coins = []; }
   try { state.signals    = JSON.parse(localStorage.getItem(LS_KEYS.SIGNALS)  || '{}'); } catch(e){ state.signals = {}; }
   state.usdToEgp        = parseFloat(localStorage.getItem(LS_KEYS.EGP)      || '50') || 50;
@@ -163,7 +242,7 @@ async function loadFromIDB() {
       state.targetBalance = saved.targetBalance  ?? state.targetBalance;
       state.signals       = saved.signals        ?? {};
       state.lastSignalUpdate = saved.lastSignalUpdate ?? null;
-      localSave(); // أعد كتابة localStorage من IDB
+      localSave();
       return true;
     }
   } catch(e) {}
@@ -238,8 +317,63 @@ function updateBrowserTitle(tpnl) {
 
 /* ════════════════════════════════════════
    WEBSOCKETS
+   في الإضافة: background يدير الـ WS ويبعت updates
+   في PWA: اتصال مباشر
 ════════════════════════════════════════ */
+function handleTickerUpdate(sym, t) {
+  const price = parseFloat(t.last);
+  const open  = parseFloat(t.sodUtc8 || t.open24h || t.last);
+
+  if (TICKER_COINS.find(c => c.sym === sym)) {
+    const prev = state.tickerPrices[sym]?.price || price;
+    state.tickerPrices[sym] = { price, change: open > 0 ? (price - open) / open * 100 : 0, prev };
+  }
+  if (state.coins.find(c => c.symbol === sym)) {
+    state.prices[sym] = {
+      price, open24h: open,
+      high24h: parseFloat(t.high24h),
+      low24h:  parseFloat(t.low24h),
+      vol24h:  parseFloat(t.vol24h)
+    };
+  }
+  state.lastPriceUpdate = Date.now();
+
+  if (!uiUpdateTimer) {
+    uiUpdateTimer = requestAnimationFrame(() => {
+      const { tpnl } = calcTotals();
+      updateBrowserTitle(tpnl);
+      syncQP();
+      if (state.currentTab === 'portfolio') updateLiveUI();
+      renderMarketBar();
+      checkProfitAlert(tpnl);
+      uiUpdateTimer = null;
+    });
+  }
+}
+
 function initWebSocket() {
+  if (IS_EXT) {
+    // الإضافة: الـ background يدير WebSocket ويبعت updates هنا
+    chrome.runtime.onMessage.addListener((msg) => {
+      if (msg.type === 'PRICE_UPDATE' && msg.sym && msg.ticker) {
+        handleTickerUpdate(msg.sym, msg.ticker);
+      }
+      if (msg.type === 'REFRESH_PRICES') {
+        refreshPrices().then(() => fetchTickerPrices());
+      }
+    });
+    // طلب تشغيل WS من background
+    chrome.runtime.sendMessage({
+      type: 'START_WS',
+      instIds: [
+        ...TICKER_COINS.map(c => c.instId),
+        ...state.coins.map(c => `${c.symbol.toUpperCase()}-USDT`)
+      ]
+    }).catch(() => {});
+    return;
+  }
+
+  // PWA: اتصال مباشر
   if (ws) ws.close();
   ws = new WebSocket(OKX_WS_URL);
 
@@ -247,7 +381,6 @@ function initWebSocket() {
     const instIds = new Set();
     TICKER_COINS.forEach(c => instIds.add(c.instId));
     state.coins.forEach(c => instIds.add(`${c.symbol.toUpperCase()}-USDT`));
-
     if (instIds.size > 0) {
       const args = Array.from(instIds).map(id => ({ channel: 'tickers', instId: id }));
       ws.send(JSON.stringify({ op: 'subscribe', args }));
@@ -258,39 +391,9 @@ function initWebSocket() {
     if (e.data === 'pong') return;
     try {
       const d = JSON.parse(e.data);
-      if (d.data && d.data.length > 0 && d.arg && d.arg.channel === 'tickers') {
-        const t = d.data[0];
+      if (d.data && d.data.length > 0 && d.arg?.channel === 'tickers') {
         const sym = d.arg.instId.replace('-USDT', '');
-        const price = parseFloat(t.last);
-        const open = parseFloat(t.sodUtc8 || t.open24h || t.last);
-
-        if (TICKER_COINS.find(c => c.sym === sym)) {
-          const prev = state.tickerPrices[sym]?.price || price;
-          state.tickerPrices[sym] = { price, change: open > 0 ? (price - open) / open * 100 : 0, prev };
-        }
-
-        if (state.coins.find(c => c.symbol === sym)) {
-          state.prices[sym] = {
-            price, open24h: open,
-            high24h: parseFloat(t.high24h),
-            low24h: parseFloat(t.low24h),
-            vol24h: parseFloat(t.vol24h)
-          };
-        }
-
-        state.lastPriceUpdate = Date.now();
-
-        if (!uiUpdateTimer) {
-          uiUpdateTimer = requestAnimationFrame(() => {
-            const { tpnl } = calcTotals();
-            updateBrowserTitle(tpnl);
-            syncQP(); 
-            if (state.currentTab === 'portfolio') updateLiveUI(); 
-            renderMarketBar(); 
-            checkProfitAlert(tpnl);
-            uiUpdateTimer = null;
-          });
-        }
+        handleTickerUpdate(sym, d.data[0]);
       }
     } catch(err) {}
   };
@@ -303,17 +406,22 @@ function initWebSocket() {
    MARKET BAR
 ════════════════════════════════════════ */
 async function fetchTickerPrices() {
-  await Promise.allSettled(TICKER_COINS.map(async ({sym, instId}) => {
-    const r = await fetch(`${OKX_TICKER}?instId=${instId}`);
-    const d = await r.json();
-    if (d.code === '0' && d.data?.[0]) {
-      const t     = d.data[0];
-      const price = parseFloat(t.last);
-      const open  = parseFloat(t.sodUtc8 || t.open24h || t.last);
-      const prev  = state.tickerPrices[sym]?.price ?? null;
-      state.tickerPrices[sym] = { price, change: open > 0 ? (price - open) / open * 100 : 0, prev };
-    }
-  }));
+  try {
+    const instIds = TICKER_COINS.map(c => c.instId);
+    const results = await apiFetch('FETCH_TICKERS_BATCH', { instIds });
+    if (!results) return;
+    results.forEach((d, i) => {
+      if (!d) return;
+      const sym = TICKER_COINS[i].sym;
+      if (d.code === '0' && d.data?.[0]) {
+        const t     = d.data[0];
+        const price = parseFloat(t.last);
+        const open  = parseFloat(t.sodUtc8 || t.open24h || t.last);
+        const prev  = state.tickerPrices[sym]?.price ?? null;
+        state.tickerPrices[sym] = { price, change: open > 0 ? (price - open) / open * 100 : 0, prev };
+      }
+    });
+  } catch(e) { console.warn('fetchTickerPrices error:', e); }
   renderMarketBar();
 }
 
@@ -348,9 +456,9 @@ function renderMarketBar() {
 ════════════════════════════════════════ */
 async function fetchTicker(symbol) {
   try {
-    const r = await fetch(`${OKX_TICKER}?instId=${symbol.toUpperCase()}-USDT`);
-    const d = await r.json();
-    if (d.code === '0' && d.data?.length > 0) {
+    const instId = `${symbol.toUpperCase()}-USDT`;
+    const d = await apiFetch('FETCH_TICKER', { instId });
+    if (d?.code === '0' && d.data?.length > 0) {
       const t = d.data[0];
       return {
         price:   parseFloat(t.last),
@@ -439,9 +547,9 @@ function showProfitBanner(usd, egp) {
 ════════════════════════════════════════ */
 async function fetchCandles(symbol) {
   try {
-    const r = await fetch(`${OKX_CANDLES}?instId=${symbol.toUpperCase()}-USDT&bar=5m&limit=60`);
-    const d = await r.json();
-    if (d.code === '0' && d.data?.length > 0)
+    const instId = `${symbol.toUpperCase()}-USDT`;
+    const d = await apiFetch('FETCH_CANDLES', { instId });
+    if (d?.code === '0' && d.data?.length > 0)
       return d.data.map(c => ({open:+c[1],high:+c[2],low:+c[3],close:+c[4],vol:+c[5]})).reverse();
   } catch(e) {}
   return null;
@@ -1234,12 +1342,18 @@ function initRefreshBtn() {
    BOOT
 ════════════════════════════════════════ */
 window.addEventListener('DOMContentLoaded', async () => {
-  // تحميل البيانات من localStorage أولاً
+  // 1. تحميل من localStorage
   load();
 
-  // إذا كان localStorage فاضي، حاول الاسترجاع من IndexedDB
-  const recovered = await loadFromIDB();
-  if (recovered) toast('✅ تم استرجاع بياناتك المحفوظة');
+  // 2. لو الإضافة: استرجع من chrome.storage.local (الأقوى)
+  const fromChrome = await chromeStorageLoad();
+  if (fromChrome) {
+    toast('✅ تم استرجاع بياناتك');
+  } else {
+    // 3. fallback: IndexedDB لو localStorage اتمسح
+    const fromIDB = await loadFromIDB();
+    if (fromIDB) toast('✅ تم استرجاع بياناتك المحفوظة');
+  }
 
   initTabs();
   initModal();
@@ -1248,7 +1362,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   renderScreen();
   renderMarketBar();
 
-  // تحديث الأسعار فوراً
   await refreshPrices();
   await fetchTickerPrices();
   renderScreen();
@@ -1257,8 +1370,8 @@ window.addEventListener('DOMContentLoaded', async () => {
   initWebSocket();
   startAutoRefresh();
 
-  // حفظ أولي في IDB لضمان التخزين
-  await idbSave();
+  // حفظ أولي في كل طبقات التخزين
+  save();
   setDbStatus('🟢 محفوظ محلياً ✓');
 
   document.getElementById('closePanelBtn')?.addEventListener('click', () => {
