@@ -1,5 +1,5 @@
 // Service Worker — OKX Tracker PWA (Local Storage Only)
-const CACHE = 'okx-tracker-v4';
+const CACHE = 'okx-tracker-v5';
 const ASSETS = ['./', './app.js', './manifest.json'];
 
 self.addEventListener('install', e => {
@@ -21,7 +21,7 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const url = e.request.url;
 
-  // لا تكاش API calls أبداً — دايماً اجلبها من النت
+  // لا كاش لأي طلب خارجي — دايماً من النت مباشرة
   if (
     url.includes('okx.com') ||
     url.includes('llm7.io') ||
@@ -29,10 +29,23 @@ self.addEventListener('fetch', e => {
     url.includes('googleapis.com') ||
     url.includes('gstatic.com') ||
     url.includes('fonts.google')
-  ) return;
+  ) {
+    e.respondWith(fetch(e.request));
+    return;
+  }
 
-  // باقي الطلبات: Cache-first ثم Network
+  // الـ WebSocket مش بيمر من هنا أصلاً، بس لو حصل ignore
+  if (e.request.headers.get('upgrade') === 'websocket') return;
+
+  // باقي الطلبات (static assets): Cache-first ثم Network
   e.respondWith(
-    caches.match(e.request).then(r => r || fetch(e.request))
+    caches.match(e.request).then(r => r || fetch(e.request).then(res => {
+      // أضف للكاش لو كانت static asset
+      if (res.ok && e.request.method === 'GET') {
+        const resClone = res.clone();
+        caches.open(CACHE).then(c => c.put(e.request, resClone));
+      }
+      return res;
+    }))
   );
 });
