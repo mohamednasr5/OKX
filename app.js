@@ -8,8 +8,24 @@
 const OKX_TICKER  = 'https://www.okx.com/api/v5/market/ticker';
 const OKX_CANDLES = 'https://www.okx.com/api/v5/market/candles';
 const OKX_WS_URL  = 'wss://ws.okx.com:8443/ws/v5/public';
-// رابط قاعدة البيانات السحابية
-const FB_REST_URL = 'https://okx01-3c8d1-default-rtdb.firebaseio.com/my_portfolio.json';
+
+// ═══════════════════════════════════════
+// مفاتيح التخزين المحلي
+// ═══════════════════════════════════════
+const LS_KEYS = {
+  COINS:      'okx_coins',
+  EGP:        'okx_egp',
+  ALERT_AT:   'okx_alertAt',
+  TARGET:     'okx_target',
+  SIGNALS:    'okx_signals',
+  SIG_TS:     'okx_sig_ts',
+};
+
+// IndexedDB كنسخة احتياطية أقوى من localStorage
+const DB_NAME    = 'OKXTrackerDB';
+const DB_VERSION = 1;
+const DB_STORE   = 'portfolio';
+let _idb = null;
 
 const TICKER_COINS = [
   {sym:'KAT',  instId:'KAT-USDT'},
@@ -39,87 +55,119 @@ let state = {
 
 let ws = null;
 let uiUpdateTimer = null;
-let isSaving = false;
 
 /* ════════════════════════════════════════
-   CLOUD SYNC (WEB & EXTENSION)
+   INDEXEDDB — تخزين دائم احتياطي
 ════════════════════════════════════════ */
-async function syncFromCloud() {
-  try {
-    const res = await fetch(FB_REST_URL);
-    if (!res.ok) throw new Error('Network');
-    const data = await res.json();
-    
-    if (data && !isSaving) {
-      const cloudCoinsStr = JSON.stringify(data.coins || []);
-      const localCoinsStr = JSON.stringify(state.coins);
-      
-      if (cloudCoinsStr !== localCoinsStr || data.usdToEgp !== state.usdToEgp || data.alertAt !== state.alertAt || (data.targetBalance !== undefined && data.targetBalance !== state.targetBalance)) {
-        state.coins = data.coins || [];
-        state.usdToEgp = data.usdToEgp || 50;
-        state.alertAt = data.alertAt || 10;
-        if (data.targetBalance !== undefined) state.targetBalance = data.targetBalance;
-        
-        localSave();
-        renderScreen();
-        syncQP();
-        if (ws && ws.readyState === WebSocket.OPEN) initWebSocket();
+function openIDB() {
+  return new Promise((resolve, reject) => {
+    if (_idb) return resolve(_idb);
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = e => {
+      const db = e.target.result;
+      if (!db.objectStoreNames.contains(DB_STORE)) {
+        db.createObjectStore(DB_STORE, { keyPath: 'id' });
       }
-      setDbStatus('🟢 متصل (تزامن سحابي)');
-    }
-  } catch (e) {
-    setDbStatus('🟡 وضع الأوفلاين');
-  }
+    };
+    req.onsuccess = e => { _idb = e.target.result; resolve(_idb); };
+    req.onerror   = () => reject(req.error);
+  });
 }
 
-async function saveToCloud() {
-  isSaving = true;
+async function idbSet(key, value) {
   try {
-    await fetch(FB_REST_URL, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        coins: state.coins,
-        usdToEgp: state.usdToEgp,
-        alertAt: state.alertAt,
-        targetBalance: state.targetBalance,
-        updatedAt: Date.now()
-      })
+    const db = await openIDB();
+    return new Promise((resolve, reject) => {
+      const tx   = db.transaction(DB_STORE, 'readwrite');
+      const store = tx.objectStore(DB_STORE);
+      store.put({ id: key, value });
+      tx.oncomplete = () => resolve();
+      tx.onerror    = () => reject(tx.error);
     });
-    setDbStatus('🟢 متصل (تم الحفظ)');
-  } catch(e) {
-    setDbStatus('🔴 خطأ في الرفع');
-  }
-  setTimeout(() => { isSaving = false; }, 2000);
+  } catch(e) {}
 }
 
+async function idbGet(key) {
+  try {
+    const db = await openIDB();
+    return new Promise((resolve, reject) => {
+      const tx    = db.transaction(DB_STORE, 'readonly');
+      const store = tx.objectStore(DB_STORE);
+      const req   = store.get(key);
+      req.onsuccess = () => resolve(req.result?.value ?? null);
+      req.onerror   = () => reject(req.error);
+    });
+  } catch(e) { return null; }
+}
+
+/* ════════════════════════════════════════
+   STORAGE — محلي بالكامل (localStorage + IndexedDB)
+════════════════════════════════════════ */
 function save() {
   localSave();
-  saveToCloud();
+  idbSave(); // نسخة احتياطية في IndexedDB
 }
 
 function localSave() {
   try {
-    localStorage.setItem('okx_coins',   JSON.stringify(state.coins));
-    localStorage.setItem('okx_egp',     state.usdToEgp);
-    localStorage.setItem('okx_alertAt', state.alertAt);
-    localStorage.setItem('okx_target',  state.targetBalance);
-    localStorage.setItem('okx_signals', JSON.stringify(state.signals));
-    if (state.lastSignalUpdate) localStorage.setItem('okx_sig_ts', state.lastSignalUpdate);
-    
+    localStorage.setItem(LS_KEYS.COINS,    JSON.stringify(state.coins));
+    localStorage.setItem(LS_KEYS.EGP,      String(state.usdToEgp));
+    localStorage.setItem(LS_KEYS.ALERT_AT, String(state.alertAt));
+    localStorage.setItem(LS_KEYS.TARGET,   String(state.targetBalance));
+    localStorage.setItem(LS_KEYS.SIGNALS,  JSON.stringify(state.signals));
+    if (state.lastSignalUpdate) {
+      localStorage.setItem(LS_KEYS.SIG_TS, String(state.lastSignalUpdate));
+    }
     if (typeof chrome !== 'undefined' && chrome.storage) {
       chrome.storage.local.set({ state_coins: state.coins });
     }
+  } catch(e) {
+    console.warn('localStorage write failed:', e);
+  }
+}
+
+async function idbSave() {
+  try {
+    await idbSet('state', {
+      coins:         state.coins,
+      usdToEgp:      state.usdToEgp,
+      alertAt:       state.alertAt,
+      targetBalance: state.targetBalance,
+      signals:       state.signals,
+      lastSignalUpdate: state.lastSignalUpdate,
+      savedAt:       Date.now(),
+    });
   } catch(e) {}
 }
 
 function load() {
-  try { state.coins      = JSON.parse(localStorage.getItem('okx_coins')        || '[]'); } catch(e){}
-  try { state.signals    = JSON.parse(localStorage.getItem('okx_signals')      || '{}'); } catch(e){}
-  state.usdToEgp        = parseFloat(localStorage.getItem('okx_egp')     || '50') || 50;
-  state.alertAt         = parseFloat(localStorage.getItem('okx_alertAt') || '10') || 10;
-  state.targetBalance   = parseFloat(localStorage.getItem('okx_target')  || '0')  || 0;
-  state.lastSignalUpdate = parseInt(localStorage.getItem('okx_sig_ts')   || '0')  || null;
+  // أولاً: حاول تحميل من localStorage
+  try { state.coins      = JSON.parse(localStorage.getItem(LS_KEYS.COINS)    || '[]'); } catch(e){ state.coins = []; }
+  try { state.signals    = JSON.parse(localStorage.getItem(LS_KEYS.SIGNALS)  || '{}'); } catch(e){ state.signals = {}; }
+  state.usdToEgp        = parseFloat(localStorage.getItem(LS_KEYS.EGP)      || '50') || 50;
+  state.alertAt         = parseFloat(localStorage.getItem(LS_KEYS.ALERT_AT) || '10') || 10;
+  state.targetBalance   = parseFloat(localStorage.getItem(LS_KEYS.TARGET)   || '0')  || 0;
+  state.lastSignalUpdate = parseInt( localStorage.getItem(LS_KEYS.SIG_TS)   || '0')  || null;
+}
+
+async function loadFromIDB() {
+  // إذا كان localStorage فارغ أو مسح، استرجع من IndexedDB
+  try {
+    const saved = await idbGet('state');
+    if (!saved) return false;
+    const hadCoins = Array.isArray(state.coins) && state.coins.length > 0;
+    if (!hadCoins && saved.coins && saved.coins.length > 0) {
+      state.coins         = saved.coins;
+      state.usdToEgp      = saved.usdToEgp      ?? state.usdToEgp;
+      state.alertAt       = saved.alertAt        ?? state.alertAt;
+      state.targetBalance = saved.targetBalance  ?? state.targetBalance;
+      state.signals       = saved.signals        ?? {};
+      state.lastSignalUpdate = saved.lastSignalUpdate ?? null;
+      localSave(); // أعد كتابة localStorage من IDB
+      return true;
+    }
+  } catch(e) {}
+  return false;
 }
 
 function setDbStatus(msg) {
@@ -129,7 +177,7 @@ function setDbStatus(msg) {
   if (d2) d2.textContent = msg;
   const dot = document.getElementById('dbDot');
   if (dot) {
-    dot.className = msg.includes('متصل') ? 'connected' : msg.includes('خطأ') ? 'error' : '';
+    dot.className = msg.includes('محلي') || msg.includes('محفوظ') ? 'connected' : msg.includes('خطأ') ? 'error' : '';
   }
 }
 
@@ -914,9 +962,9 @@ function renderSettings() {
     <button class="save-settings-btn" id="saveSettingsBtn">💾 حفظ الإعدادات</button>
 
     <div class="info-box">
-      ☁️ <strong>مزامنة سحابية (REST API)</strong> — بياناتك بتظهر على طول في المتصفح والإضافة<br>
-      <span id="dbStatus2">جاري الاتصال...</span><br>
-      🤖 <strong style="color:var(--accent)">مستشار AI مدمج</strong> — مفيش أخطاء تانية<br>
+      💾 <strong>تخزين محلي كامل</strong> — بياناتك محفوظة على جهازك (localStorage + IndexedDB)<br>
+      <span id="dbStatus2">جاري التحقق...</span><br>
+      🤖 <strong style="color:var(--accent)">مستشار AI مدمج</strong> — تحليل محلي بدون إنترنت<br>
       ⏱️ تحليل تلقائي كل <strong style="color:var(--accent)">5 دقائق</strong>
     </div>`;
 }
@@ -1024,7 +1072,7 @@ function addCoin() {
 }
 
 function saveSettingsHandler() {
-  toast('✅ تم الحفظ و المزامنة السحابية'); save();
+  toast('✅ تم الحفظ محلياً ✓'); save();
   setTimeout(() => renderScreen(), 600);
 }
 
@@ -1147,16 +1195,21 @@ function initModal() {
    AUTO REFRESH
 ════════════════════════════════════════ */
 function startAutoRefresh() {
-  setInterval(syncFromCloud, 15000);
-
+  // تحديث إشارات AI كل 5 دقائق تلقائياً
   setInterval(() => {
-    const age = state.lastSignalUpdate ? Date.now()-state.lastSignalUpdate : Infinity;
-    if (age > 5*60*1000 && state.coins.length > 0 && !state.analyzing) runAllSignals();
-  }, 60*1000);
+    const age = state.lastSignalUpdate ? Date.now() - state.lastSignalUpdate : Infinity;
+    if (age > 5 * 60 * 1000 && state.coins.length > 0 && !state.analyzing) runAllSignals();
+  }, 60 * 1000);
 
+  // إعادة رسم شاشة الإشارات كل 10 ثواني لتحديث الوقت
   setInterval(() => {
     if (state.currentTab === 'signals' && !state.analyzing) renderScreen();
   }, 10000);
+
+  // حفظ دوري كل دقيقة ضماناً إضافياً
+  setInterval(() => {
+    if (state.coins.length > 0) save();
+  }, 60 * 1000);
 }
 
 /* ════════════════════════════════════════
@@ -1167,13 +1220,13 @@ function initRefreshBtn() {
     const btn = document.getElementById('refreshBtn');
     btn.innerHTML = '<span class="spin">🔄</span>';
     
-    await syncFromCloud(); 
     initWebSocket(); 
     await refreshPrices();
     await fetchTickerPrices();
     
     btn.innerHTML = '🔄';
-    toast('✅ تم التحديث والمزامنة');
+    setDbStatus('🟢 محفوظ محلياً ✓');
+    toast('✅ تم تحديث الأسعار');
   });
 }
 
@@ -1181,7 +1234,13 @@ function initRefreshBtn() {
    BOOT
 ════════════════════════════════════════ */
 window.addEventListener('DOMContentLoaded', async () => {
-  load(); 
+  // تحميل البيانات من localStorage أولاً
+  load();
+
+  // إذا كان localStorage فاضي، حاول الاسترجاع من IndexedDB
+  const recovered = await loadFromIDB();
+  if (recovered) toast('✅ تم استرجاع بياناتك المحفوظة');
+
   initTabs();
   initModal();
   initQuickPanel();
@@ -1189,8 +1248,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   renderScreen();
   renderMarketBar();
 
-  await syncFromCloud(); 
-
+  // تحديث الأسعار فوراً
   await refreshPrices();
   await fetchTickerPrices();
   renderScreen();
@@ -1199,6 +1257,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   initWebSocket();
   startAutoRefresh();
 
+  // حفظ أولي في IDB لضمان التخزين
+  await idbSave();
+  setDbStatus('🟢 محفوظ محلياً ✓');
+
   document.getElementById('closePanelBtn')?.addEventListener('click', () => {
     if (typeof window !== 'undefined') window.close();
   });
@@ -1206,7 +1268,15 @@ window.addEventListener('DOMContentLoaded', async () => {
   if ('Notification' in window && Notification.permission === 'default')
     setTimeout(() => Notification.requestPermission(), 3000);
 
-  const age = state.lastSignalUpdate ? Date.now()-state.lastSignalUpdate : Infinity;
-  if (age > 5*60*1000 && state.coins.length > 0)
+  const age = state.lastSignalUpdate ? Date.now() - state.lastSignalUpdate : Infinity;
+  if (age > 5 * 60 * 1000 && state.coins.length > 0)
     setTimeout(runAllSignals, 3000);
+
+  // حفظ عند إغلاق/إخفاء الصفحة
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && state.coins.length > 0) save();
+  });
+  window.addEventListener('beforeunload', () => {
+    if (state.coins.length > 0) localSave();
+  });
 });
