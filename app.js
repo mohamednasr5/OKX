@@ -55,6 +55,9 @@ let state = {
 
 let ws = null;
 let uiUpdateTimer = null;
+let wsReconnectDelay = 1000;   // يبدأ بثانية وبيتضاعف لو فشل
+let wsPingTimer = null;
+let wsReconnectTimer = null;
 
 /* ════════════════════════════════════════
    INDEXEDDB — تخزين دائم احتياطي
@@ -256,7 +259,20 @@ function setDbStatus(msg) {
   if (d2) d2.textContent = msg;
   const dot = document.getElementById('dbDot');
   if (dot) {
-    dot.className = msg.includes('محلي') || msg.includes('محفوظ') ? 'connected' : msg.includes('خطأ') ? 'error' : '';
+    dot.className = msg.includes('متصل') ? 'connected' :
+                    msg.includes('محلي') || msg.includes('محفوظ') ? 'connected' :
+                    msg.includes('خطأ') ? 'error' : '';
+  }
+  // تحديث الـ live pill في الهيدر
+  const pill = document.getElementById('livePill');
+  if (pill) {
+    if (msg.includes('متصل مباشر')) {
+      pill.style.borderColor = 'rgba(16,185,129,.35)';
+      pill.style.background  = 'rgba(16,185,129,.1)';
+    } else if (msg.includes('إعادة اتصال')) {
+      pill.style.borderColor = 'rgba(245,158,11,.35)';
+      pill.style.background  = 'rgba(245,158,11,.08)';
+    }
   }
 }
 
@@ -338,16 +354,17 @@ function handleTickerUpdate(sym, t) {
   }
   state.lastPriceUpdate = Date.now();
 
+  // debounce بـ 80ms لتجميع updates متتالية في frame واحد بدون ضياع
   if (!uiUpdateTimer) {
-    uiUpdateTimer = requestAnimationFrame(() => {
+    uiUpdateTimer = setTimeout(() => {
+      uiUpdateTimer = null;
       const { tpnl } = calcTotals();
       updateBrowserTitle(tpnl);
       syncQP();
       if (state.currentTab === 'portfolio') updateLiveUI();
       renderMarketBar();
       checkProfitAlert(tpnl);
-      uiUpdateTimer = null;
-    });
+    }, 80);
   }
 }
 
@@ -374,10 +391,14 @@ function initWebSocket() {
   }
 
   // PWA: اتصال مباشر
-  if (ws) ws.close();
-  ws = new WebSocket(OKX_WS_URL);
+  _wsCleanup();
+
+  try { ws = new WebSocket(OKX_WS_URL); } catch(e) { _wsScheduleReconnect(); return; }
 
   ws.onopen = () => {
+    wsReconnectDelay = 1000; // إعادة تعيين الـ delay لما الكونيكشن ينجح
+    setDbStatus('🟢 متصل مباشر ⚡');
+
     const instIds = new Set();
     TICKER_COINS.forEach(c => instIds.add(c.instId));
     state.coins.forEach(c => instIds.add(`${c.symbol.toUpperCase()}-USDT`));
@@ -385,6 +406,14 @@ function initWebSocket() {
       const args = Array.from(instIds).map(id => ({ channel: 'tickers', instId: id }));
       ws.send(JSON.stringify({ op: 'subscribe', args }));
     }
+
+    // Ping كل 15 ثانية — OKX بتقطع الكونيكشن بعد 30 ثانية بدون ping
+    if (wsPingTimer) clearInterval(wsPingTimer);
+    wsPingTimer = setInterval(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send('ping');
+      }
+    }, 15000);
   };
 
   ws.onmessage = (e) => {
@@ -398,8 +427,35 @@ function initWebSocket() {
     } catch(err) {}
   };
 
-  ws.onclose = () => { setTimeout(initWebSocket, 3000); };
-  setInterval(() => { if (ws && ws.readyState === WebSocket.OPEN) ws.send('ping'); }, 20000);
+  ws.onerror = () => { /* onclose هيشتغل تلقائياً بعدها */ };
+
+  ws.onclose = (e) => {
+    _wsCleanup();
+    // لو مش إغلاق طبيعي، أعد الاتصال بـ exponential backoff
+    if (e.code !== 1000) {
+      setDbStatus('🟡 إعادة اتصال...');
+      _wsScheduleReconnect();
+    }
+  };
+}
+
+function _wsCleanup() {
+  if (wsPingTimer)  { clearInterval(wsPingTimer);   wsPingTimer = null; }
+  if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+  if (ws) {
+    ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null;
+    try { ws.close(1000); } catch(e) {}
+    ws = null;
+  }
+}
+
+function _wsScheduleReconnect() {
+  if (wsReconnectTimer) return;
+  wsReconnectTimer = setTimeout(() => {
+    wsReconnectTimer = null;
+    wsReconnectDelay = Math.min(wsReconnectDelay * 2, 30000); // max 30 ثانية
+    initWebSocket();
+  }, wsReconnectDelay);
 }
 
 /* ════════════════════════════════════════
@@ -474,8 +530,29 @@ async function fetchTicker(symbol) {
 
 async function refreshPrices() {
   if (!state.coins.length) return;
-  const results = await Promise.all(state.coins.map(c => fetchTicker(c.symbol)));
-  results.forEach((r, i) => { if (r) state.prices[state.coins[i].symbol] = r; });
+  try {
+    // نجيب كل الأسعار في request واحد بدل ما كل عملة في request منفصل
+    const instIds = state.coins.map(c => `${c.symbol.toUpperCase()}-USDT`);
+    const results = await apiFetch('FETCH_TICKERS_BATCH', { instIds });
+    if (results) {
+      results.forEach((d, i) => {
+        if (!d || d.code !== '0' || !d.data?.[0]) return;
+        const t = d.data[0];
+        const sym = state.coins[i].symbol;
+        state.prices[sym] = {
+          price:   parseFloat(t.last),
+          open24h: parseFloat(t.sodUtc8 || t.open24h || t.last),
+          high24h: parseFloat(t.high24h),
+          low24h:  parseFloat(t.low24h),
+          vol24h:  parseFloat(t.vol24h),
+        };
+      });
+    }
+  } catch(e) {
+    // Fallback: كل عملة لوحدها
+    const results = await Promise.all(state.coins.map(c => fetchTicker(c.symbol)));
+    results.forEach((r, i) => { if (r) state.prices[state.coins[i].symbol] = r; });
+  }
   state.lastPriceUpdate = Date.now();
   const { tpnl } = calcTotals();
   if (tpnl > 0) checkProfitAlert(tpnl);
@@ -1318,6 +1395,18 @@ function startAutoRefresh() {
   setInterval(() => {
     if (state.coins.length > 0) save();
   }, 60 * 1000);
+
+  // REST fallback كل 10 ثواني — لو الـ WebSocket فاته أي update يضمن التزامن
+  setInterval(() => {
+    if (!document.hidden) {
+      const lastUpdate = state.lastPriceUpdate ? Date.now() - state.lastPriceUpdate : Infinity;
+      // لو مفيش update من الـ WS في آخر 12 ثانية، اجلب بالـ REST
+      if (lastUpdate > 12000) {
+        refreshPrices();
+        fetchTickerPrices();
+      }
+    }
+  }, 10000);
 }
 
 /* ════════════════════════════════════════
@@ -1387,7 +1476,16 @@ window.addEventListener('DOMContentLoaded', async () => {
 
   // حفظ عند إغلاق/إخفاء الصفحة
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden && state.coins.length > 0) save();
+    if (document.hidden) {
+      if (state.coins.length > 0) save();
+    } else {
+      // لما التطبيق يرجع للأمام، تحقق من الكونيكشن وحدّث الأسعار
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        initWebSocket();
+      }
+      refreshPrices();
+      fetchTickerPrices();
+    }
   });
   window.addEventListener('beforeunload', () => {
     if (state.coins.length > 0) localSave();
